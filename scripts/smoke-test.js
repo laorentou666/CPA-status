@@ -85,7 +85,12 @@ try {
   const page = pageResponse.text;
   assert.equal(pageResponse.status, 200);
   assert.match(page, /CPA Status/);
-  assert.match(page, /账号管理/);
+  assert.match(page, /管理员入口/);
+  assert.match(page, /账号状态/);
+
+  const adminPageResponse = await request(`${baseURL}/admin`);
+  assert.equal(adminPageResponse.status, 200);
+  assert.match(adminPageResponse.text, /管理员登录/);
 
   const refreshResponse = await request(`${baseURL}/api/refresh`, {
     method: 'POST',

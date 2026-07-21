@@ -22,10 +22,14 @@ export class CPAError extends Error {
 
 export class CPAClient {
   constructor({ managementURL, managementKey, timeoutMs = 45_000, fetchImpl = fetch }) {
+    this.fetch = fetchImpl;
+    this.configure({ managementURL, managementKey, timeoutMs });
+  }
+
+  configure({ managementURL, managementKey, timeoutMs = 45_000 }) {
     this.managementURL = managementURL.replace(/\/$/, '');
     this.managementKey = managementKey;
     this.timeoutMs = timeoutMs;
-    this.fetch = fetchImpl;
   }
 
   headers(extra = {}) {

@@ -1,8 +1,9 @@
-import { loadConfig } from './config.js';
+import { ConfigManager } from './config.js';
 import { createApplication } from './application.js';
 
-const config = loadConfig();
-const app = createApplication(config);
+const configManager = new ConfigManager();
+const config = configManager.current();
+const app = createApplication(config, { configManager });
 
 try {
   const address = await app.start();

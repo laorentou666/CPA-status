@@ -1,6 +1,6 @@
 # CPA Status
 
-面向 CLIProxyAPI 的独立账号监测服务。后台调度器随进程启动，不依赖浏览器页面；SSE 只用于把后台已经同步并写入 SQLite 的结果实时推送到前端。
+面向 CLIProxyAPI 的独立账号监测服务。后台调度器随进程启动，不依赖浏览器页面；SSE 只负责把已经同步并写入 SQLite 的结果实时推送到前端。
 
 已按以下版本接口实现和测试：
 
@@ -10,21 +10,29 @@
 
 ## 功能
 
-- 定时同步 CPA 账号数量、运行状态、成功/失败计数和最近请求健康度。
-- Codex：5 小时/周等额度窗口、计划、Credits 余额和重置时间。
-- Claude：5 小时、7 天、模型级和 scoped limits。
-- Kimi：Coding usage 与 limits。
-- Antigravity：Quota Summary 与 Available Models 配额。
-- xAI/Grok：CLI billing 周/月数据；付费 API OAuth 在 billing 不可用时退回只读身份检查。
-- Gemini、AI Studio、Vertex、API Key 和未知 Provider：持续监测 CPA 状态和请求表现，但不虚构不存在的统一余额接口。
-- Telegram 与 PushPlus 可同时启用，通知模块可继续扩展。
+- 定时同步 CPA 账号数量、状态、成功/失败计数和最近请求健康度。
+- Codex、Claude、Kimi、Antigravity、xAI/Grok 主动额度查询。
+- Gemini、AI Studio、Vertex、API Key 和未知 Provider 持续监测 CPA 状态和请求表现，但不虚构不存在的统一余额接口。
+- Telegram、PushPlus、Server酱通知，可同时启用。
 - 状态变化、额度耗尽、账号移除、CPA 失联与恢复告警。
-- 网页端提供通用账号管理选项卡，可单个删除、任意多选删除，并可批量删除认证失效或不可用账号。
-- SQLite 历史记录、SSE 页面更新、可选管理密码。
+- SQLite 历史记录和 SSE 页面更新。
+- `.env` 自动加载及热更新，大部分参数修改后不需要重启容器。
+- 游客页与管理员页分离，监控和账号管理合并在同一张账号表中。
 
-账号删除调用 CLIProxyAPI `v7.2.29` 文档和源码提供的 `DELETE /v0/management/auth-files`，批量请求体使用 `{ "names": [...] }`。CPA 删除成功后，监控服务立即重新读取 `/auth-files`，不会只删除本地 SQLite 数据。
+## 页面权限
 
-`runtime_only=true` 或 `source=memory` 的凭据没有磁盘认证文件，CLIProxyAPI 明确不支持通过该端点删除，因此页面会禁用删除操作。批量“异常账号”采用保守范围，只包含 `auth_invalid` 与 `unavailable`；临时额度耗尽、警告和人工禁用账号仍可在通用列表中手动选择，但不会被异常批量按钮自动删除。
+| 地址 | 权限 | 功能 |
+| --- | --- | --- |
+| `http://127.0.0.1:8080/` | 游客 | 查看摘要、账号状态、额度、事件和通知渠道状态 |
+| `http://127.0.0.1:8080/admin` | 管理员 | 游客页全部内容，以及立即同步、通知测试、单个/批量删除账号 |
+
+游客可以读取监控数据，但所有修改类 API 都要求管理员会话。公网部署必须设置：
+
+```env
+APP_ADMIN_PASSWORD=replace-with-a-strong-password
+```
+
+未设置管理密码时，管理员页不要求登录，仅适合可信内网或本机使用。
 
 ## 本地运行
 
@@ -32,42 +40,156 @@
 
 ```bash
 cp .env.example .env
-```
-
-本项目不自动加载 `.env`。本地运行前请在 shell 中设置环境变量，或使用 Docker Compose 的 `.env` 注入：
-
-```bash
 npm start
 ```
 
-默认访问：`http://127.0.0.1:8080`
+应用会自动读取项目目录下的 `.env`。也可以用 `CONFIG_FILE` 指定其他文件：
+
+```bash
+CONFIG_FILE=/etc/cpa-status.env npm start
+```
 
 ## 必需配置
 
 | 变量 | 说明 |
 | --- | --- |
-| `CPA_MANAGEMENT_URL` | CPA 管理 API 地址，例如 `https://cpa.example.com/v0/management`。只填写站点根地址时也会自动补全路径。 |
-| `CPA_MANAGEMENT_KEY` | CLIProxyAPI Management Key。仅保存在后端环境变量中。 |
-| `APP_ADMIN_PASSWORD` | 页面管理密码。公网部署时必须设置。 |
+| `CPA_MANAGEMENT_URL` | CPA 管理 API 地址，例如 `https://cpa.example.com/v0/management`。只填写站点根地址时会自动补全路径。 |
+| `CPA_MANAGEMENT_KEY` | CLIProxyAPI Management Key。只在后端使用，不会返回网页。 |
+| `APP_ADMIN_PASSWORD` | 管理员页密码。公网部署时必须设置。 |
 
-主要可选项见 [.env.example](.env.example)。
+完整配置见 [.env.example](.env.example)。
 
-## 通知
+## 配置热更新
 
-同时启用 Telegram 与 PushPlus：
+程序每秒检查一次 `.env`。文件发生变化时，先完整解析和校验，再一次性应用新配置。配置格式错误时会保留上一份有效配置，并在日志中说明原因。
+
+以下配置支持热更新：
+
+- `CPA_MANAGEMENT_URL`、`CPA_MANAGEMENT_KEY`
+- `ACCOUNT_SYNC_INTERVAL_SECONDS`、`QUOTA_SYNC_INTERVAL_SECONDS`
+- `QUOTA_CONCURRENCY`、`QUOTA_WARNING_PERCENT`
+- `REQUEST_TIMEOUT_SECONDS`、`HISTORY_RETENTION_DAYS`
+- `APP_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`
+- 全部通知渠道和通知凭证
+
+具体行为：
+
+- CPA 地址或 Key 变化后会更新客户端并立即触发一次同步。
+- 同步周期变化后会重新安排定时器，不会重启进程。
+- 管理密码或会话时长变化后，已有管理员会话会失效，需要重新登录。
+- 通知配置变化后，渠道状态和测试按钮会实时更新。
+- 多个已打开页面会通过 SSE 收到配置变化。
+
+以下启动参数不能热更新：`HOST`、`PORT`、`DATABASE_PATH`。修改后日志会提示需要重启。端口还受到 Docker 端口映射限制，数据库路径则涉及正在使用的 SQLite 连接。
+
+显式设置的进程环境变量优先于 `.env`。因此若通过 `docker run -e` 或 shell 导出了同名变量，该变量不会被 `.env` 覆盖，也无法通过修改文件热更新。仓库提供的 Docker Compose 已改为直接挂载 `.env`，不会重复注入这些运行参数。
+
+## 通知配置
+
+### 基本规则
+
+`NOTIFY_CHANNELS` 决定启用哪些渠道，多个渠道使用英文逗号分隔：
 
 ```env
-NOTIFY_CHANNELS=telegram,pushplus
-TELEGRAM_BOT_TOKEN=123456:token
+NOTIFY_CHANNELS=telegram,pushplus,serverchan
+```
+
+`NOTIFY_MIN_SEVERITY` 决定最低通知级别：
+
+| 值 | 发送范围 |
+| --- | --- |
+| `info` | 普通信息、警告、严重事件 |
+| `warning` | 警告和严重事件，默认值 |
+| `critical` | 只发送严重事件 |
+
+账号恢复和 CPA 恢复事件始终发送，不受最低级别限制。
+
+### Telegram
+
+```env
+NOTIFY_CHANNELS=telegram
+TELEGRAM_BOT_TOKEN=123456:bot-token
 TELEGRAM_CHAT_IDS=10001,10002
-PUSHPLUS_TOKEN=pushplus-token
 ```
 
-通知默认发送 `warning`、`critical`，并始终发送账号和 CPA 恢复事件。若还要发送账号增加等普通信息事件，可设置：
+- `TELEGRAM_BOT_TOKEN`：从 [@BotFather](https://t.me/BotFather) 创建机器人后获得。
+- `TELEGRAM_CHAT_IDS`：接收人的 Chat ID，多个 ID 使用英文逗号分隔。
+- 发送接口采用 Telegram 官方 `sendMessage`，同一事件会发送给全部 Chat ID。
+
+官方文档：<https://core.telegram.org/bots/api#sendmessage>
+
+### PushPlus
 
 ```env
-NOTIFY_MIN_SEVERITY=info
+NOTIFY_CHANNELS=pushplus
+PUSHPLUS_TOKEN=your-token
+PUSHPLUS_TOPIC=
+PUSHPLUS_CHANNEL=wechat
 ```
+
+- `PUSHPLUS_TOKEN`：PushPlus 用户 Token。
+- `PUSHPLUS_TOPIC`：群组编码，可选；留空时发送给 Token 所属用户。
+- `PUSHPLUS_CHANNEL`：发送渠道，默认 `wechat`。
+- 消息使用官方 `/send` 接口和 `html` 模板。
+
+官方文档：<https://www.pushplus.plus/doc/>
+
+### Server酱
+
+```env
+NOTIFY_CHANNELS=serverchan
+SERVERCHAN_SENDKEY=SCTxxxxxxxx
+```
+
+`SERVERCHAN_SENDKEY` 支持两种官方格式：
+
+- Server酱 Turbo：以 `SCT` 开头，调用 `https://sctapi.ftqq.com/{SendKey}.send`。
+- Server酱³：格式为 `sctp{uid}t...`，调用 `https://{uid}.push.ft07.com/send/{SendKey}.send`。
+
+请求使用官方文档规定的 `title` 和 Markdown `desp` 参数，只有返回 JSON 的 `code` 为 `0` 才记录为发送成功。SendKey 不会写入日志或返回前端。
+
+官方文档：
+
+- Node.js 接入：<https://sct.ftqq.com/docs/integrations/nodejs/>
+- SendKey 格式与获取：<https://sct.ftqq.com/docs/getting-started/sendkey/>
+- 额度与排查：<https://sct.ftqq.com/docs/getting-started/faq/>
+
+### 同时启用多个渠道
+
+```env
+NOTIFY_CHANNELS=telegram,pushplus,serverchan
+NOTIFY_MIN_SEVERITY=warning
+
+TELEGRAM_BOT_TOKEN=123456:bot-token
+TELEGRAM_CHAT_IDS=10001,10002
+
+PUSHPLUS_TOKEN=your-token
+PUSHPLUS_TOPIC=
+PUSHPLUS_CHANNEL=wechat
+
+SERVERCHAN_SENDKEY=SCTxxxxxxxx
+```
+
+修改并保存 `.env` 后无需重启。进入 `/admin`，可在“通知渠道”区域分别发送测试消息。
+
+## 账号删除
+
+账号删除调用 CLIProxyAPI `v7.2.29` 提供的 `DELETE /v0/management/auth-files`，批量请求体使用 `{ "names": [...] }`。CPA 删除成功后，监控服务会立即重新读取 `/auth-files`，不会只删除本地 SQLite 数据。
+
+`runtime_only=true` 或 `source=memory` 的凭据没有磁盘认证文件，CLIProxyAPI 不支持通过该端点删除，因此管理员页会禁用操作。批量“异常账号”只包含 `auth_invalid` 与 `unavailable`，不会自动删除临时额度耗尽、警告或人工禁用账号。
+
+## Docker
+
+首次部署或升级到支持热加载的版本时，需要重新构建一次：
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Compose 会把宿主机 `.env` 只读挂载到容器 `/app/.env`。此后修改宿主机 `.env` 即可热更新，不需要反复执行 `docker compose down/up`。
+
+SQLite 数据保存在命名卷 `cpa-status-data`。容器启动时会检查数据目录权限，然后以非 root UID/GID 运行。若使用宿主机绑定目录，请保证容器用户对目录可读写。
 
 ## 测试
 
@@ -76,47 +198,21 @@ npm test
 npm run smoke
 ```
 
-Smoke test 会启动一个模拟 CLIProxyAPI 和真实 CPA Status HTTP 服务，等待后台调度器在没有浏览器连接的情况下完成账号及 Codex 额度同步，然后验证：
-
-- `/api/health`
-- `/api/dashboard`
-- 管理页面静态资源
-- 手动刷新接口
-- SQLite 中的账号和额度结果
-
-## Docker
-
-```bash
-docker compose up -d --build
-```
-
-SQLite 数据保存在 Docker 命名卷 `cpa-status-data` 中。容器启动时会检查并修正数据目录权限，然后以非 root UID/GID 运行服务。容器使用 Node.js 22 内置 SQLite，不需要额外数据库服务。
-
-若自行使用宿主机绑定目录，例如 `-v /opt/cpa-status/data:/data`，启动器也会尝试将目录调整为 `DATA_UID`/`DATA_GID`，默认均为 `1000`。受限文件系统不允许 `chown` 时，可在宿主机执行：
-
-```bash
-sudo mkdir -p /opt/cpa-status/data
-sudo chown -R 1000:1000 /opt/cpa-status/data
-```
-
-遇到旧容器反复输出 `unable to open database file` 时，重新构建并创建容器：
-
-```bash
-docker compose down
-docker compose up -d --build
-```
+测试覆盖配置文件监听、热更新应用、游客/管理员权限、账号删除、Provider 解析和三种通知渠道。Smoke test 会启动模拟 CLIProxyAPI 与真实 CPA Status HTTP 服务，验证后台调度、SQLite、页面、删除和手动同步接口。
 
 ## 安全边界
 
-- 前端和 API 不返回 Management Key、OAuth Token 或认证文件内容。
-- Provider 查询只能通过代码中的 HTTPS 域名白名单，未暴露通用 `/api-call` 转发接口。
-- 对没有可靠只读额度接口的 Provider，仅使用 CPA 状态和请求数据，不发送模型推理请求。
+- 前端和 API 不返回 Management Key、OAuth Token、SendKey 或认证文件内容。
+- 游客只允许读取监控信息，修改类 API 统一要求管理员会话。
+- Provider 查询只能访问代码中的 HTTPS 域名白名单，不暴露通用 `/api-call` 转发接口。
+- 对没有可靠只读额度接口的 Provider，只使用 CPA 状态和请求数据，不发送模型推理请求。
 - 公网部署应设置 `APP_ADMIN_PASSWORD`，并由反向代理提供 HTTPS。
 
-## Provider 数据来源
+## 数据与接口来源
 
 - CLIProxyAPI Management API：<https://help.router-for.me/management/api>
 - CLIProxyAPI：<https://github.com/router-for-me/CLIProxyAPI>
 - CPA Manager Plus：<https://github.com/seakee/CPA-Manager-Plus>
 - Telegram Bot API：<https://core.telegram.org/bots/api>
 - PushPlus：<https://www.pushplus.plus/doc/>
+- Server酱：<https://sct.ftqq.com/docs/>

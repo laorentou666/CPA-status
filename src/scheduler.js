@@ -56,34 +56,49 @@ export class MonitorScheduler {
     this.accountSyncRunning = false;
     this.quotaSyncRunning = false;
     this.expectedRemovedAuthIndexes = new Set();
-    this.timers = [];
+    this.startupTimer = null;
+    this.intervalTimers = [];
     this.stopped = true;
   }
 
   start() {
     if (!this.stopped) return;
     this.stopped = false;
-    const startup = setTimeout(async () => {
-      try {
-        await this.runAccountSync();
-        await this.runQuotaSync();
-      } catch (error) {
-        this.logger.error('[scheduler] startup check failed:', error.message);
-      }
-    }, 10);
-    this.timers.push(startup);
-    this.timers.push(setInterval(() => this.runAccountSync().catch((error) => {
+    this.scheduleTimers(true);
+  }
+
+  scheduleTimers(runStartup = false) {
+    if (runStartup) {
+      this.startupTimer = setTimeout(async () => {
+        try {
+          await this.runAccountSync();
+          await this.runQuotaSync();
+        } catch (error) {
+          this.logger.error('[scheduler] startup check failed:', error.message);
+        }
+      }, 10);
+    }
+    this.intervalTimers.push(setInterval(() => this.runAccountSync().catch((error) => {
       this.logger.error('[scheduler] account sync failed:', error.message);
     }), this.config.accountSyncIntervalMs));
-    this.timers.push(setInterval(() => this.runQuotaSync().catch((error) => {
+    this.intervalTimers.push(setInterval(() => this.runQuotaSync().catch((error) => {
       this.logger.error('[scheduler] quota sync failed:', error.message);
     }), this.config.quotaSyncIntervalMs));
   }
 
+  reschedule() {
+    if (this.stopped) return;
+    for (const timer of this.intervalTimers) clearInterval(timer);
+    this.intervalTimers = [];
+    this.scheduleTimers(false);
+  }
+
   stop() {
     this.stopped = true;
-    for (const timer of this.timers) clearInterval(timer);
-    this.timers = [];
+    if (this.startupTimer) clearTimeout(this.startupTimer);
+    this.startupTimer = null;
+    for (const timer of this.intervalTimers) clearInterval(timer);
+    this.intervalTimers = [];
   }
 
   async trigger(includeQuota = true) {
@@ -177,8 +192,10 @@ export class MonitorScheduler {
     const checkedAt = nowISO();
     try {
       const accounts = this.store.listAccounts();
+      const concurrency = this.config.quotaConcurrency;
+      const warningPercent = this.config.quotaWarningPercent;
       let completed = 0;
-      const results = await mapConcurrent(accounts, this.config.quotaConcurrency, async (account) => {
+      const results = await mapConcurrent(accounts, concurrency, async (account) => {
         const result = await this.providers.probe(
           {
             authIndex: account.auth_index,
@@ -189,7 +206,7 @@ export class MonitorScheduler {
           },
           this.cpaClient
         );
-        const quotaState = evaluateQuotaState(result, this.config.quotaWarningPercent);
+        const quotaState = evaluateQuotaState(result, warningPercent);
         const effectiveState = combineStates(account.base_state, quotaState);
         const previous = this.store.updateQuota(
           account.auth_index,

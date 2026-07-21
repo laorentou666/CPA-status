@@ -40,9 +40,16 @@ function cookies(request) {
 
 class SessionManager {
   constructor(password, ttlMs) {
+    this.sessions = new Map();
     this.password = password;
     this.ttlMs = ttlMs;
-    this.sessions = new Map();
+  }
+
+  configure(password, ttlMs) {
+    const sessionPolicyChanged = password !== this.password || ttlMs !== this.ttlMs;
+    this.password = password;
+    this.ttlMs = ttlMs;
+    if (sessionPolicyChanged) this.sessions.clear();
   }
 
   required() {
@@ -73,6 +80,11 @@ class SessionManager {
     const id = cookies(request).cpa_status_session;
     if (id) this.sessions.delete(id);
   }
+}
+
+function requiresAdmin(request, pathname) {
+  if (!pathname.startsWith('/api/') || pathname === '/api/session') return false;
+  return request.method !== 'GET' && request.method !== 'HEAD';
 }
 
 function staticFile(response, filename, contentType) {
@@ -134,7 +146,7 @@ export function createHTTPServer({ config, store, scheduler, notifications, prov
         return json(response, 200, { ok: true });
       }
 
-      if (url.pathname.startsWith('/api/') && !sessions.authenticated(request)) {
+      if (requiresAdmin(request, url.pathname) && !sessions.authenticated(request)) {
         return json(response, 401, { error: 'authentication required' });
       }
 
@@ -191,7 +203,10 @@ export function createHTTPServer({ config, store, scheduler, notifications, prov
         return json(response, result.status === 'partial' ? 207 : 200, result);
       }
 
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      if (request.method === 'GET' && (
+        url.pathname === '/' || url.pathname === '/index.html' ||
+        url.pathname === '/admin' || url.pathname === '/admin/'
+      )) {
         return staticFile(response, 'index.html', 'text/html; charset=utf-8');
       }
       if (request.method === 'GET' && url.pathname === '/app.js') {
@@ -208,5 +223,12 @@ export function createHTTPServer({ config, store, scheduler, notifications, prov
       json(response, 500, { error: truncate(error.message, 300) });
     }
   });
-  return server;
+  return {
+    server,
+    reconfigure(nextConfig, changedKeys = []) {
+      if (changedKeys.includes('adminPassword') || changedKeys.includes('sessionTtlMs')) {
+        sessions.configure(nextConfig.adminPassword, nextConfig.sessionTtlMs);
+      }
+    },
+  };
 }

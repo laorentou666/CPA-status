@@ -10,6 +10,7 @@ import { AccountDeletionService } from './account-deletion.js';
 
 export function createApplication(config, options = {}) {
   const logger = options.logger || console;
+  const configManager = options.configManager || null;
   const store = options.store || new Store(config.databasePath);
   const providers = options.providers || new ProviderRegistry();
   const cpaClient = options.cpaClient || new CPAClient({
@@ -40,7 +41,7 @@ export function createApplication(config, options = {}) {
     scheduler,
     alerts,
   });
-  const server = createHTTPServer({
+  const http = createHTTPServer({
     config,
     store,
     scheduler,
@@ -50,6 +51,42 @@ export function createApplication(config, options = {}) {
     accountDeletion,
     logger,
   });
+  const server = http.server;
+
+  const onConfigChange = ({ changedKeys, restartRequired }) => {
+    if (restartRequired.length) {
+      logger.warn?.(`[config] restart required for: ${restartRequired.join(', ')}`);
+    }
+    if (changedKeys.some((key) => [
+      'cpaManagementURL', 'cpaManagementKey', 'requestTimeoutMs',
+    ].includes(key))) {
+      cpaClient.configure({
+        managementURL: config.cpaManagementURL,
+        managementKey: config.cpaManagementKey,
+        timeoutMs: config.requestTimeoutMs,
+      });
+    }
+    if (changedKeys.some((key) => [
+      'notifyChannels', 'notifyMinSeverity', 'telegram', 'pushplus', 'serverchan',
+    ].includes(key))) {
+      notifications.configure(config);
+    }
+    if (changedKeys.some((key) => [
+      'accountSyncIntervalMs', 'quotaSyncIntervalMs',
+    ].includes(key))) {
+      scheduler.reschedule();
+    }
+    http.reconfigure(config, changedKeys);
+    hub.broadcast('config:update', {
+      at: new Date().toISOString(),
+    });
+    hub.broadcast('dashboard:update', { source: 'config', at: new Date().toISOString() });
+
+    if (changedKeys.some((key) => ['cpaManagementURL', 'cpaManagementKey'].includes(key))) {
+      scheduler.trigger(true).catch((error) => logger.error('[config] CPA resync failed:', error.message));
+    }
+  };
+  configManager?.on('change', onConfigChange);
 
   return {
     config,
@@ -71,9 +108,12 @@ export function createApplication(config, options = {}) {
         });
       });
       scheduler.start();
+      configManager?.startWatching();
       return server.address();
     },
     async stop() {
+      configManager?.stopWatching();
+      configManager?.off('change', onConfigChange);
       scheduler.stop();
       hub.close();
       if (server.listening) await new Promise((resolve) => server.close(resolve));

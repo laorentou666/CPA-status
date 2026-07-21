@@ -87,14 +87,71 @@ export class PushPlusNotifier {
   }
 }
 
+function serverChanEndpoint(sendKey) {
+  const key = String(sendKey || '').trim();
+  if (key.startsWith('SCT')) {
+    return `https://sctapi.ftqq.com/${encodeURIComponent(key)}.send`;
+  }
+  const sc3 = key.match(/^sctp(\d+)t/);
+  if (sc3) {
+    return `https://${sc3[1]}.push.ft07.com/send/${encodeURIComponent(key)}.send`;
+  }
+  throw new Error('ServerChan SendKey must start with SCT or use the sctp{uid}t format');
+}
+
+export class ServerChanNotifier {
+  constructor(config, fetchImpl = fetch) {
+    this.name = 'serverchan';
+    this.config = config;
+    this.fetch = fetchImpl;
+  }
+
+  configured() {
+    return Boolean(this.config.sendKey);
+  }
+
+  async send(event) {
+    if (!this.configured()) throw new Error('ServerChan is not configured');
+    const title = `[CPA Status] ${event.title}`.replace(/[\r\n]+/g, ' ').trim();
+    const desp = [
+      event.message,
+      `**级别：** ${event.severity}`,
+      `**时间：** ${event.createdAt || new Date().toISOString()}`,
+    ].filter(Boolean).join('\n\n');
+    const response = await this.fetch(serverChanEndpoint(this.config.sendKey), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, desp }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`ServerChan HTTP ${response.status}: ${truncate(body)}`);
+    let parsed;
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch {
+      throw new Error(`ServerChan returned invalid JSON: ${truncate(body)}`);
+    }
+    if (Number(parsed.code) !== 0) {
+      throw new Error(`ServerChan: ${truncate(parsed.message || parsed.data || body)}`);
+    }
+  }
+}
+
 export class NotificationService {
   constructor(config, store, fetchImpl = fetch) {
     this.store = store;
+    this.fetch = fetchImpl;
+    this.configure(config);
+  }
+
+  configure(config) {
     this.enabled = new Set(config.notifyChannels || []);
     this.minimumSeverity = config.notifyMinSeverity || 'warning';
     this.notifiers = new Map([
-      ['telegram', new TelegramNotifier(config.telegram, fetchImpl)],
-      ['pushplus', new PushPlusNotifier(config.pushplus, fetchImpl)],
+      ['telegram', new TelegramNotifier(config.telegram, this.fetch)],
+      ['pushplus', new PushPlusNotifier(config.pushplus, this.fetch)],
+      ['serverchan', new ServerChanNotifier(config.serverchan, this.fetch)],
     ]);
   }
 
@@ -158,4 +215,4 @@ export class NotificationService {
   }
 }
 
-export { eventText };
+export { eventText, serverChanEndpoint };

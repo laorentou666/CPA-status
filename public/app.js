@@ -1,14 +1,14 @@
 const elements = Object.fromEntries(
   [
-    'loginView', 'loginForm', 'password', 'loginError', 'app', 'connectionBadge', 'lastSync',
-    'refreshButton', 'logoutButton', 'totalCount', 'healthyCount', 'warningCount',
-    'exhaustedCount', 'unavailableCount', 'scheduleText', 'searchInput', 'providerFilter',
-    'stateFilter', 'accountsBody', 'emptyState', 'eventsList', 'notificationList',
-    'capabilityList', 'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider',
-    'drawerTitle', 'drawerContent', 'toast', 'overviewView', 'accountManagerView',
-    'selectionText', 'deleteSelectedButton', 'deleteAbnormalButton', 'managerSearchInput',
-    'managerProviderFilter', 'managerStateFilter', 'selectAllAccounts', 'managementBody',
-    'managementEmptyState',
+    'loginView', 'loginForm', 'password', 'loginError', 'app', 'pageMode',
+    'connectionBadge', 'lastSync', 'refreshButton', 'adminLink', 'logoutButton',
+    'totalCount', 'healthyCount', 'warningCount', 'exhaustedCount', 'unavailableCount',
+    'scheduleText', 'selectionText', 'managementActions', 'deleteSelectedButton',
+    'deleteAbnormalButton', 'searchInput', 'providerFilter', 'stateFilter',
+    'accountsTable', 'selectColumnHeader', 'operationHeader', 'selectAllAccounts',
+    'accountsBody', 'emptyState', 'eventsList', 'notificationList', 'capabilityList',
+    'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider', 'drawerTitle',
+    'drawerContent', 'toast',
   ].map((id) => [id, document.getElementById(id)])
 );
 
@@ -17,11 +17,13 @@ const stateLabels = {
   disabled: '已禁用', unavailable: '不可用', missing: '已移除', rate_limited: '被限流', unknown: '未知',
 };
 
+const adminMode = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
+const abnormalDeletionStates = new Set(['auth_invalid', 'unavailable']);
+const selectedAccounts = new Set();
+let adminAuthenticated = false;
 let dashboard = null;
 let eventSource = null;
 let toastTimer = null;
-const selectedAccounts = new Set();
-const abnormalDeletionStates = new Set(['auth_invalid', 'unavailable']);
 
 function escapeHTML(value) {
   return String(value ?? '')
@@ -52,23 +54,34 @@ async function api(path, options = {}) {
   });
   const body = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    showLogin();
-    throw new Error(body.error || '需要登录');
+    if (adminMode) showLogin();
+    throw new Error(body.error || '需要管理员登录');
   }
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
   return body;
 }
 
 function showLogin() {
+  adminAuthenticated = false;
   elements.app.hidden = true;
   elements.loginView.hidden = false;
   eventSource?.close();
+  elements.password.focus();
 }
 
 function showApp(session) {
+  adminAuthenticated = Boolean(adminMode && session.authenticated);
   elements.loginView.hidden = true;
   elements.app.hidden = false;
-  elements.logoutButton.hidden = !session.required;
+  elements.pageMode.textContent = adminAuthenticated ? '管理员页' : '游客只读页';
+  elements.refreshButton.hidden = !adminAuthenticated;
+  elements.adminLink.hidden = adminMode;
+  elements.logoutButton.hidden = !adminAuthenticated || !session.required;
+  elements.managementActions.hidden = !adminAuthenticated;
+  elements.selectionText.hidden = !adminAuthenticated;
+  elements.selectColumnHeader.hidden = !adminAuthenticated;
+  elements.operationHeader.hidden = !adminAuthenticated;
+  elements.accountsTable.classList.toggle('admin-table', adminAuthenticated);
 }
 
 function quotaHTML(account, limit = 2) {
@@ -89,14 +102,19 @@ function quotaHTML(account, limit = 2) {
   }).join('')}</div>`;
 }
 
+function deletionEligibility(account) {
+  if (account.runtimeOnly || account.runtime_only) return { allowed: false, reason: '运行时凭据' };
+  if (account.metadata?.source !== 'file') return { allowed: false, reason: '非磁盘文件' };
+  if (!String(account.name || '').toLowerCase().endsWith('.json')) return { allowed: false, reason: '非 JSON 认证文件' };
+  return { allowed: true, reason: '' };
+}
+
 function renderProviders() {
   const providers = Object.keys(dashboard.providers || {}).sort();
-  for (const select of [elements.providerFilter, elements.managerProviderFilter]) {
-    const current = select.value;
-    select.innerHTML = '<option value="">全部 Provider</option>' + providers
-      .map((provider) => `<option value="${escapeHTML(provider)}">${escapeHTML(provider)}</option>`).join('');
-    select.value = providers.includes(current) ? current : '';
-  }
+  const current = elements.providerFilter.value;
+  elements.providerFilter.innerHTML = '<option value="">全部 Provider</option>' + providers
+    .map((provider) => `<option value="${escapeHTML(provider)}">${escapeHTML(provider)}</option>`).join('');
+  elements.providerFilter.value = providers.includes(current) ? current : '';
 }
 
 function filteredAccounts() {
@@ -112,43 +130,8 @@ function filteredAccounts() {
   });
 }
 
-function renderAccounts() {
-  const accounts = filteredAccounts();
-  elements.emptyState.hidden = accounts.length > 0;
-  elements.accountsBody.innerHTML = accounts.map((account) => `
-    <tr data-account="${escapeHTML(account.auth_index)}">
-      <td><div class="account-name">${escapeHTML(account.label || account.email || account.name)}</div>
-        <div class="account-meta">${escapeHTML(account.email || account.name)} · ${escapeHTML(account.auth_index)}</div></td>
-      <td><span class="provider-tag">${escapeHTML(account.provider)}</span></td>
-      <td><span class="state-pill ${escapeHTML(account.effective_state)}">${escapeHTML(stateLabels[account.effective_state] || account.effective_state)}</span></td>
-      <td>${escapeHTML(account.plan_type || account.account_type || '-')}</td>
-      <td>${quotaHTML(account)}</td>
-      <td><span class="request-counts"><span class="success">${account.success_count || 0}</span><span class="failed">${account.failed_count || 0}</span></span></td>
-      <td class="time-cell">${escapeHTML(formatTime(account.quota_checked_at || account.last_seen_at))}</td>
-    </tr>`).join('');
-}
-
-function deletionEligibility(account) {
-  if (account.runtimeOnly || account.runtime_only) return { allowed: false, reason: '运行时凭据' };
-  if (account.metadata?.source !== 'file') return { allowed: false, reason: '非磁盘文件' };
-  if (!String(account.name || '').toLowerCase().endsWith('.json')) return { allowed: false, reason: '非 JSON 认证文件' };
-  return { allowed: true, reason: '' };
-}
-
-function filteredManagementAccounts() {
-  const query = elements.managerSearchInput.value.trim().toLowerCase();
-  const provider = elements.managerProviderFilter.value;
-  const accountState = elements.managerStateFilter.value;
-  return (dashboard.accounts || []).filter((account) => {
-    const haystack = [account.name, account.email, account.label, account.auth_index, account.account_name]
-      .join(' ').toLowerCase();
-    return (!query || haystack.includes(query))
-      && (!provider || account.provider === provider)
-      && (!accountState || account.effective_state === accountState);
-  });
-}
-
-function updateManagementActions(accounts = filteredManagementAccounts()) {
+function updateManagementActions(accounts = filteredAccounts()) {
+  if (!adminAuthenticated) return;
   const currentIndexes = new Set((dashboard.accounts || []).map((account) => account.auth_index));
   for (const authIndex of selectedAccounts) {
     if (!currentIndexes.has(authIndex)) selectedAccounts.delete(authIndex);
@@ -169,19 +152,28 @@ function updateManagementActions(accounts = filteredManagementAccounts()) {
   elements.selectAllAccounts.indeterminate = selectedVisible.length > 0 && selectedVisible.length < selectable.length;
 }
 
-function renderManagementAccounts() {
-  const accounts = filteredManagementAccounts();
-  elements.managementEmptyState.hidden = accounts.length > 0;
-  elements.managementBody.innerHTML = accounts.map((account) => {
+function renderAccounts() {
+  const accounts = filteredAccounts();
+  elements.emptyState.hidden = accounts.length > 0;
+  elements.accountsBody.innerHTML = accounts.map((account) => {
     const eligibility = deletionEligibility(account);
-    return `<tr>
-      <td class="account-checkbox-cell"><input class="account-checkbox" type="checkbox" data-select-account="${escapeHTML(account.auth_index)}" aria-label="选择 ${escapeHTML(account.name)}" ${selectedAccounts.has(account.auth_index) ? 'checked' : ''} ${eligibility.allowed ? '' : 'disabled'}></td>
-      <td><div class="account-name">${escapeHTML(account.label || account.email || account.name)}</div><div class="account-meta">${escapeHTML(account.auth_index)}</div></td>
+    const selectionCell = adminAuthenticated
+      ? `<td class="account-checkbox-cell"><input class="account-checkbox" type="checkbox" data-select-account="${escapeHTML(account.auth_index)}" aria-label="选择 ${escapeHTML(account.name)}" ${selectedAccounts.has(account.auth_index) ? 'checked' : ''} ${eligibility.allowed ? '' : `disabled title="${escapeHTML(eligibility.reason)}"`}></td>`
+      : '';
+    const operationCell = adminAuthenticated
+      ? `<td class="operation-cell">${eligibility.allowed ? `<button class="button danger-outline account-delete" type="button" data-delete-account="${escapeHTML(account.auth_index)}">删除</button>` : `<span class="undeletable">${escapeHTML(eligibility.reason)}</span>`}</td>`
+      : '';
+    return `<tr data-account="${escapeHTML(account.auth_index)}">
+      ${selectionCell}
+      <td><div class="account-name">${escapeHTML(account.label || account.email || account.name)}</div>
+        <div class="account-meta">${escapeHTML(account.email || account.name)} · ${escapeHTML(account.auth_index)}</div></td>
       <td><span class="provider-tag">${escapeHTML(account.provider)}</span></td>
       <td><span class="state-pill ${escapeHTML(account.effective_state)}">${escapeHTML(stateLabels[account.effective_state] || account.effective_state)}</span></td>
-      <td><span class="source-label">${escapeHTML(account.metadata?.source || 'unknown')}</span></td>
-      <td><span class="account-meta">${escapeHTML(account.name)}</span>${eligibility.allowed ? '' : `<div class="undeletable">${escapeHTML(eligibility.reason)}</div>`}</td>
-      <td>${eligibility.allowed ? `<button class="button danger-outline account-delete" type="button" data-delete-account="${escapeHTML(account.auth_index)}">删除</button>` : '-'}</td>
+      <td>${escapeHTML(account.plan_type || account.account_type || '-')}</td>
+      <td>${quotaHTML(account)}</td>
+      <td><span class="request-counts"><span class="success">${account.success_count || 0}</span><span class="failed">${account.failed_count || 0}</span></span></td>
+      <td class="time-cell">${escapeHTML(formatTime(account.quota_checked_at || account.last_seen_at))}</td>
+      ${operationCell}
     </tr>`;
   }).join('');
   updateManagementActions(accounts);
@@ -201,7 +193,7 @@ function renderOperations() {
   elements.notificationList.innerHTML = (dashboard.notificationChannels || []).map((channel) => `
     <div class="notification-row">
       <div><span>${escapeHTML(channel.name)}</span><small>${channel.configured ? (channel.enabled ? ' 已启用' : ' 已配置') : ' 未配置'}</small></div>
-      <button class="button notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>
+      ${adminAuthenticated ? `<button class="button notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>` : ''}
     </div>`).join('');
   const capabilityLabels = { 'active-quota': '主动额度', 'health-only': '健康状态' };
   elements.capabilityList.innerHTML = Object.entries(dashboard.providerCapabilities || {}).map(([provider, capability]) => `
@@ -225,21 +217,10 @@ function renderDashboard() {
   renderAccounts();
   renderEvents();
   renderOperations();
-  renderManagementAccounts();
-}
-
-function switchView(view) {
-  const overview = view === 'overview';
-  elements.overviewView.hidden = !overview;
-  elements.accountManagerView.hidden = overview;
-  document.querySelectorAll('.view-tab').forEach((button) => {
-    button.classList.toggle('active', button.dataset.view === view);
-  });
-  if (!overview) renderManagementAccounts();
 }
 
 async function deleteAccounts(authIndexes, label) {
-  if (!authIndexes.length) return;
+  if (!adminAuthenticated || !authIndexes.length) return;
   const confirmed = window.confirm(`确定删除${label}吗？认证文件会同时从 CLIProxyAPI 中删除，此操作不可撤销。`);
   if (!confirmed) return;
   elements.deleteSelectedButton.disabled = true;
@@ -260,6 +241,7 @@ async function deleteAccounts(authIndexes, label) {
 }
 
 async function deleteAbnormalAccounts() {
+  if (!adminAuthenticated) return;
   const abnormal = (dashboard.accounts || []).filter(
     (account) => abnormalDeletionStates.has(account.effective_state) && deletionEligibility(account).allowed
   );
@@ -289,7 +271,15 @@ function connectSSE() {
   eventSource?.close();
   eventSource = new EventSource('/api/stream');
   eventSource.addEventListener('dashboard:update', () => loadDashboard().catch(() => {}));
+  eventSource.addEventListener('config:update', async () => {
+    if (adminMode) {
+      const session = await api('/api/session').catch(() => null);
+      if (!session?.authenticated) return showLogin();
+    }
+    loadDashboard().catch(() => {});
+  });
   eventSource.addEventListener('quota:progress', (event) => {
+    if (!adminAuthenticated) return;
     const progress = JSON.parse(event.data);
     elements.refreshButton.textContent = `检查中 ${progress.completed}/${progress.total}`;
   });
@@ -310,6 +300,8 @@ function openDrawer(authIndex) {
       <div class="detail-item"><span>状态</span><strong>${escapeHTML(stateLabels[account.effective_state] || account.effective_state)}</strong></div>
       <div class="detail-item"><span>CPA 状态</span><strong>${escapeHTML(account.cpa_status || '-')}</strong></div>
       <div class="detail-item"><span>Auth Index</span><strong>${escapeHTML(account.auth_index)}</strong></div>
+      <div class="detail-item"><span>认证文件</span><strong>${escapeHTML(account.name || '-')}</strong></div>
+      <div class="detail-item"><span>来源</span><strong>${escapeHTML(account.metadata?.source || 'unknown')}</strong></div>
       <div class="detail-item"><span>计划</span><strong>${escapeHTML(account.plan_type || account.account_type || '-')}</strong></div>
       <div class="detail-item"><span>成功 / 失败</span><strong>${account.success_count || 0} / ${account.failed_count || 0}</strong></div>
       <div class="detail-item"><span>额度检查</span><strong>${escapeHTML(formatTime(account.quota_checked_at))}</strong></div>
@@ -346,6 +338,7 @@ elements.logoutButton.addEventListener('click', async () => {
 });
 
 elements.refreshButton.addEventListener('click', async () => {
+  if (!adminAuthenticated) return;
   elements.refreshButton.disabled = true;
   elements.refreshButton.textContent = '已提交';
   try {
@@ -364,46 +357,42 @@ elements.refreshButton.addEventListener('click', async () => {
 elements.searchInput.addEventListener('input', renderAccounts);
 elements.providerFilter.addEventListener('change', renderAccounts);
 elements.stateFilter.addEventListener('change', renderAccounts);
-document.querySelectorAll('.view-tab').forEach((button) => {
-  button.addEventListener('click', () => switchView(button.dataset.view));
-});
-elements.managerSearchInput.addEventListener('input', renderManagementAccounts);
-elements.managerProviderFilter.addEventListener('change', renderManagementAccounts);
-elements.managerStateFilter.addEventListener('change', renderManagementAccounts);
-elements.managementBody.addEventListener('change', (event) => {
+elements.accountsBody.addEventListener('change', (event) => {
   const checkbox = event.target.closest('[data-select-account]');
-  if (!checkbox) return;
+  if (!checkbox || !adminAuthenticated) return;
   if (checkbox.checked) selectedAccounts.add(checkbox.dataset.selectAccount);
   else selectedAccounts.delete(checkbox.dataset.selectAccount);
   updateManagementActions();
 });
-elements.managementBody.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-delete-account]');
-  if (!button) return;
-  const account = dashboard.accounts.find((item) => item.auth_index === button.dataset.deleteAccount);
-  deleteAccounts([button.dataset.deleteAccount], `账号 ${account?.label || account?.email || account?.name || ''}`);
+elements.accountsBody.addEventListener('click', (event) => {
+  const deleteButton = event.target.closest('[data-delete-account]');
+  if (deleteButton) {
+    const account = dashboard.accounts.find((item) => item.auth_index === deleteButton.dataset.deleteAccount);
+    deleteAccounts([deleteButton.dataset.deleteAccount], `账号 ${account?.label || account?.email || account?.name || ''}`);
+    return;
+  }
+  if (event.target.closest('button, input, a')) return;
+  const row = event.target.closest('[data-account]');
+  if (row) openDrawer(row.dataset.account);
 });
 elements.selectAllAccounts.addEventListener('change', () => {
-  for (const account of filteredManagementAccounts()) {
+  if (!adminAuthenticated) return;
+  for (const account of filteredAccounts()) {
     if (!deletionEligibility(account).allowed) continue;
     if (elements.selectAllAccounts.checked) selectedAccounts.add(account.auth_index);
     else selectedAccounts.delete(account.auth_index);
   }
-  renderManagementAccounts();
+  renderAccounts();
 });
 elements.deleteSelectedButton.addEventListener('click', () => {
   deleteAccounts([...selectedAccounts], `所选 ${selectedAccounts.size} 个账号`);
 });
 elements.deleteAbnormalButton.addEventListener('click', deleteAbnormalAccounts);
-elements.accountsBody.addEventListener('click', (event) => {
-  const row = event.target.closest('[data-account]');
-  if (row) openDrawer(row.dataset.account);
-});
 elements.drawerBackdrop.addEventListener('click', closeDrawer);
 elements.drawerClose.addEventListener('click', closeDrawer);
 elements.notificationList.addEventListener('click', async (event) => {
   const button = event.target.closest('.notification-test');
-  if (!button) return;
+  if (!button || !adminAuthenticated) return;
   button.disabled = true;
   try {
     const result = await api('/api/notifications/test', {
@@ -413,12 +402,14 @@ elements.notificationList.addEventListener('click', async (event) => {
     showToast(delivery?.status === 'sent' ? `${button.dataset.channel} 测试成功` : `${button.dataset.channel}: ${delivery?.error || delivery?.status}`);
   } catch (error) {
     showToast(error.message);
-  } finally { button.disabled = false; }
+  } finally {
+    button.disabled = false;
+  }
 });
 
 async function boot() {
   const session = await api('/api/session');
-  if (!session.authenticated) return showLogin();
+  if (adminMode && !session.authenticated) return showLogin();
   showApp(session);
   await loadDashboard();
   connectSSE();
