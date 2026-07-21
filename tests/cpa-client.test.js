@@ -15,6 +15,11 @@ test('CPA client reads v7.2.29 auth file shape and proxies an allowlisted call',
     header: { Authorization: 'Bearer $TOKEN$' },
   });
   assert.equal(response.statusCode, 200);
+
+  const deleted = await client.deleteAuthFiles(['gemini-user.json']);
+  assert.equal(deleted.deleted, 1);
+  assert.deepEqual(deleted.files, ['gemini-user.json']);
+  assert.equal((await client.listAuthFiles()).length, 1);
 });
 
 test('CPA client rejects arbitrary api-call targets', async () => {
@@ -24,4 +29,3 @@ test('CPA client rejects arbitrary api-call targets', async () => {
     (error) => error instanceof CPAError && /allowlisted/.test(error.message)
   );
 });
-

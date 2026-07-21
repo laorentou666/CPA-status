@@ -19,7 +19,12 @@
 - Gemini、AI Studio、Vertex、API Key 和未知 Provider：持续监测 CPA 状态和请求表现，但不虚构不存在的统一余额接口。
 - Telegram 与 PushPlus 可同时启用，通知模块可继续扩展。
 - 状态变化、额度耗尽、账号移除、CPA 失联与恢复告警。
+- 网页端提供通用账号管理选项卡，可单个删除、任意多选删除，并可批量删除认证失效或不可用账号。
 - SQLite 历史记录、SSE 页面更新、可选管理密码。
+
+账号删除调用 CLIProxyAPI `v7.2.29` 文档和源码提供的 `DELETE /v0/management/auth-files`，批量请求体使用 `{ "names": [...] }`。CPA 删除成功后，监控服务立即重新读取 `/auth-files`，不会只删除本地 SQLite 数据。
+
+`runtime_only=true` 或 `source=memory` 的凭据没有磁盘认证文件，CLIProxyAPI 明确不支持通过该端点删除，因此页面会禁用删除操作。批量“异常账号”采用保守范围，只包含 `auth_invalid` 与 `unavailable`；临时额度耗尽、警告和人工禁用账号仍可在通用列表中手动选择，但不会被异常批量按钮自动删除。
 
 ## 本地运行
 

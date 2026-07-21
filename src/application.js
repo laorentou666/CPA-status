@@ -6,6 +6,7 @@ import { AlertEngine } from './alerts.js';
 import { SSEHub } from './sse.js';
 import { MonitorScheduler } from './scheduler.js';
 import { createHTTPServer } from './server.js';
+import { AccountDeletionService } from './account-deletion.js';
 
 export function createApplication(config, options = {}) {
   const logger = options.logger || console;
@@ -33,6 +34,12 @@ export function createApplication(config, options = {}) {
     hub,
     logger,
   });
+  const accountDeletion = options.accountDeletion || new AccountDeletionService({
+    store,
+    cpaClient,
+    scheduler,
+    alerts,
+  });
   const server = createHTTPServer({
     config,
     store,
@@ -40,6 +47,7 @@ export function createApplication(config, options = {}) {
     notifications,
     providers,
     hub,
+    accountDeletion,
     logger,
   });
 
@@ -52,6 +60,7 @@ export function createApplication(config, options = {}) {
     alerts,
     hub,
     scheduler,
+    accountDeletion,
     server,
     async start() {
       await new Promise((resolve, reject) => {
@@ -72,4 +81,3 @@ export function createApplication(config, options = {}) {
     },
   };
 }
-

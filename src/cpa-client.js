@@ -74,6 +74,33 @@ export class CPAClient {
     return payload.files;
   }
 
+  async deleteAuthFiles(names) {
+    const uniqueNames = [...new Set((names || []).map((name) => String(name).trim()).filter(Boolean))];
+    if (!uniqueNames.length) throw new CPAError('No auth file names were provided');
+    for (const name of uniqueNames) {
+      if (name.includes('/') || name.includes('\\') || !name.toLowerCase().endsWith('.json')) {
+        throw new CPAError(`Unsafe auth file name: ${name}`);
+      }
+    }
+    const payload = await this.request('/auth-files', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: uniqueNames }),
+    });
+    const files = Array.isArray(payload?.files)
+      ? payload.files
+      : uniqueNames.length === 1 && payload?.status === 'ok'
+        ? [uniqueNames[0]]
+        : [];
+    const failed = Array.isArray(payload?.failed) ? payload.failed : [];
+    return {
+      status: payload?.status || (failed.length ? 'partial' : 'ok'),
+      deleted: Number.isFinite(Number(payload?.deleted)) ? Number(payload.deleted) : files.length,
+      files,
+      failed,
+    };
+  }
+
   async apiCall(authIndex, request) {
     const target = new URL(request.url);
     if (target.protocol !== 'https:' || !allowedProbeHosts.has(target.hostname)) {
@@ -100,4 +127,3 @@ export class CPAClient {
     };
   }
 }
-

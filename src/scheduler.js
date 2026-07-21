@@ -55,6 +55,7 @@ export class MonitorScheduler {
     this.logger = logger;
     this.accountSyncRunning = false;
     this.quotaSyncRunning = false;
+    this.expectedRemovedAuthIndexes = new Set();
     this.timers = [];
     this.stopped = true;
   }
@@ -90,6 +91,26 @@ export class MonitorScheduler {
     if (includeQuota) await this.runQuotaSync();
   }
 
+  async refreshAfterMutation() {
+    const deadline = Date.now() + 10_000;
+    while (this.accountSyncRunning && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (this.accountSyncRunning) {
+      setTimeout(() => this.runAccountSync().catch((error) => {
+        this.logger.error('[scheduler] post-mutation sync failed:', error.message);
+      }), 1000);
+      return false;
+    }
+    return this.runAccountSync();
+  }
+
+  expectRemoved(authIndexes) {
+    for (const authIndex of authIndexes || []) {
+      if (authIndex) this.expectedRemovedAuthIndexes.add(String(authIndex));
+    }
+  }
+
   async setConnection(connected, error = null) {
     const previous = this.store.getState('cpa_connection', null);
     const current = { connected, error, checkedAt: nowISO() };
@@ -119,10 +140,17 @@ export class MonitorScheduler {
         await this.alerts.accountTransition(before, current, account.statusMessage);
       }
       const missing = this.store.markMissing(seen, seenAt);
-      for (const account of missing) await this.alerts.accountMissing(account);
+      let unexpectedMissing = 0;
+      for (const account of missing) {
+        if (this.expectedRemovedAuthIndexes.delete(account.auth_index)) continue;
+        unexpectedMissing += 1;
+        await this.alerts.accountMissing(account);
+      }
 
       const previousCount = this.store.getState('last_account_count', null);
-      await this.alerts.accountCountChanged(previousCount, files.length);
+      if (previousCount === null || files.length >= previousCount || unexpectedMissing > 0) {
+        await this.alerts.accountCountChanged(previousCount, files.length);
+      }
       this.store.setState('last_account_count', files.length);
       this.store.setState('last_account_sync', { status: 'ok', at: seenAt, accountCount: files.length });
       this.store.finishRun(runId, 'ok', files.length);

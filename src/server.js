@@ -93,7 +93,7 @@ function staticFile(response, filename, contentType) {
   }
 }
 
-export function createHTTPServer({ config, store, scheduler, notifications, providers, hub, logger = console }) {
+export function createHTTPServer({ config, store, scheduler, notifications, providers, hub, accountDeletion, logger = console }) {
   const sessions = new SessionManager(config.adminPassword, config.sessionTtlMs);
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -177,6 +177,20 @@ export function createHTTPServer({ config, store, scheduler, notifications, prov
         return json(response, 200, { results });
       }
 
+      if (request.method === 'DELETE' && url.pathname === '/api/accounts') {
+        const body = await readJSON(request);
+        if (!Array.isArray(body.authIndexes) || body.authIndexes.length === 0) {
+          return json(response, 400, { error: 'authIndexes must be a non-empty array' });
+        }
+        const result = await accountDeletion.deleteByAuthIndexes(body.authIndexes, 'selected');
+        return json(response, result.status === 'partial' ? 207 : 200, result);
+      }
+
+      if (request.method === 'DELETE' && url.pathname === '/api/accounts/abnormal') {
+        const result = await accountDeletion.deleteAbnormal();
+        return json(response, result.status === 'partial' ? 207 : 200, result);
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         return staticFile(response, 'index.html', 'text/html; charset=utf-8');
       }
@@ -196,4 +210,3 @@ export function createHTTPServer({ config, store, scheduler, notifications, prov
   });
   return server;
 }
-

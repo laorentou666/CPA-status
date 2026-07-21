@@ -36,7 +36,13 @@
         </div>
       </header>
 
+      <nav class="view-tabs" aria-label="主视图">
+        <button class="view-tab active" type="button" data-view="overview">监控概览</button>
+        <button class="view-tab" type="button" data-view="accounts">账号管理</button>
+      </nav>
+
       <main>
+        <div id="overviewView">
         <section class="summary-band" aria-label="账号摘要">
           <div class="summary-inner">
             <article class="metric"><span>账号总数</span><strong id="totalCount">0</strong></article>
@@ -99,6 +105,51 @@
             <div class="section-heading compact provider-heading"><h2>Provider 能力</h2></div>
             <div id="capabilityList" class="capability-list"></div>
           </aside>
+        </section>
+        </div>
+
+        <section id="accountManagerView" class="workspace account-manager" hidden>
+          <div class="section-heading account-manager-heading">
+            <div>
+              <h2>账号管理</h2>
+              <p id="selectionText">已选择 0 个账号</p>
+            </div>
+            <div class="management-actions">
+              <button id="deleteSelectedButton" class="button danger" type="button" disabled>删除所选</button>
+              <button id="deleteAbnormalButton" class="button danger-outline" type="button">删除异常账号</button>
+            </div>
+          </div>
+          <div class="filters management-filters">
+            <input id="managerSearchInput" type="search" placeholder="搜索账号、备注或索引" aria-label="搜索待管理账号">
+            <select id="managerProviderFilter" aria-label="账号管理 Provider 筛选"><option value="">全部 Provider</option></select>
+            <select id="managerStateFilter" aria-label="账号管理状态筛选">
+              <option value="">全部状态</option>
+              <option value="healthy">正常</option>
+              <option value="warning">警告</option>
+              <option value="quota_exhausted">额度耗尽</option>
+              <option value="auth_invalid">认证失效</option>
+              <option value="disabled">已禁用</option>
+              <option value="unavailable">不可用</option>
+              <option value="unknown">未知</option>
+            </select>
+          </div>
+          <div class="table-frame management-table-frame">
+            <table class="management-table">
+              <thead>
+                <tr>
+                  <th class="checkbox-column"><input id="selectAllAccounts" type="checkbox" aria-label="选择全部可删除账号"></th>
+                  <th>账号</th>
+                  <th>Provider</th>
+                  <th>状态</th>
+                  <th>来源</th>
+                  <th>认证文件</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="managementBody"></tbody>
+            </table>
+            <div id="managementEmptyState" class="empty-state" hidden>没有符合条件的账号</div>
+          </div>
         </section>
       </main>
 

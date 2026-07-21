@@ -1,10 +1,31 @@
 import http from 'node:http';
 
 export async function startMockCPA({ files = [], apiCall } = {}) {
+  let currentFiles = files.map((file) => ({ ...file }));
   const server = http.createServer(async (request, response) => {
     if (request.url === '/v0/management/auth-files' && request.method === 'GET') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ files }));
+      response.end(JSON.stringify({ files: currentFiles }));
+      return;
+    }
+    if (request.url === '/v0/management/auth-files' && request.method === 'DELETE') {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      const names = Array.isArray(body.names) ? [...new Set(body.names)] : [];
+      const existingNames = new Set(currentFiles.map((file) => file.name));
+      const deletedFiles = names.filter((name) => existingNames.has(name));
+      const failed = names
+        .filter((name) => !existingNames.has(name))
+        .map((name) => ({ name, error: 'auth file not found' }));
+      currentFiles = currentFiles.filter((file) => !deletedFiles.includes(file.name));
+      response.writeHead(failed.length ? 207 : 200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({
+        status: failed.length ? 'partial' : 'ok',
+        deleted: deletedFiles.length,
+        files: deletedFiles,
+        failed,
+      }));
       return;
     }
     if (request.url === '/v0/management/api-call' && request.method === 'POST') {
@@ -23,6 +44,7 @@ export async function startMockCPA({ files = [], apiCall } = {}) {
   return {
     server,
     managementURL: `http://127.0.0.1:${port}/v0/management`,
+    files: () => currentFiles.map((file) => ({ ...file })),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
@@ -49,6 +71,8 @@ export function fixtureFiles() {
       status_message: 'ok',
       disabled: false,
       unavailable: false,
+      runtime_only: false,
+      source: 'file',
       success: 12,
       failed: 1,
       recent_requests: [{ time: '12:00-12:10', success: 3, failed: 0 }],
@@ -63,6 +87,8 @@ export function fixtureFiles() {
       status: 'ready',
       disabled: false,
       unavailable: false,
+      runtime_only: false,
+      source: 'file',
       success: 5,
       failed: 0,
       email: 'gemini@example.com',
@@ -87,4 +113,3 @@ export function mockApiCall(body) {
   }
   return { status_code: 404, header: {}, body: '{}' };
 }
-
