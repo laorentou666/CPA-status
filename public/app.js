@@ -24,6 +24,8 @@ let adminAuthenticated = false;
 let dashboard = null;
 let eventSource = null;
 let toastTimer = null;
+let refreshTimer = null;
+let refreshing = false;
 
 function escapeHTML(value) {
   return String(value ?? '')
@@ -38,6 +40,32 @@ function formatTime(value, fallback = '-') {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   }).format(date);
+}
+
+function maskEmail(value) {
+  if (!value) return value;
+  const str = String(value);
+  const at = str.indexOf('@');
+  if (at < 1) return str;
+  const local = str.slice(0, at);
+  const domain = str.slice(at);
+  const visible = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
+  const masked = visible + '*'.repeat(Math.max(3, Math.min(local.length - visible.length, 5)));
+  return masked + domain;
+}
+
+function maskIfNeeded(value) {
+  return adminAuthenticated ? value : maskEmail(value);
+}
+
+function accountLabel(account) {
+  const label = account.label || account.email || account.name || '';
+  return maskIfNeeded(label);
+}
+
+function accountMetaText(account) {
+  const email = account.email ? maskIfNeeded(account.email) : (account.name || '');
+  return `${email} · ${account.auth_index || ''}`;
 }
 
 function showToast(message) {
@@ -66,6 +94,7 @@ function showLogin() {
   elements.app.hidden = true;
   elements.loginView.hidden = false;
   eventSource?.close();
+  elements.password.value = '';
   elements.password.focus();
 }
 
@@ -81,7 +110,7 @@ function showApp(session) {
   elements.selectionText.hidden = !adminAuthenticated;
   elements.selectColumnHeader.hidden = !adminAuthenticated;
   elements.operationHeader.hidden = !adminAuthenticated;
-  elements.accountsTable.classList.toggle('admin-table', adminAuthenticated);
+  elements.accountsTable.classList.toggle('admin-mode', adminAuthenticated);
 }
 
 function quotaHTML(account, limit = 2) {
@@ -94,12 +123,20 @@ function quotaHTML(account, limit = 2) {
   return `<div class="quota-stack">${windows.map((window) => {
     const used = typeof window.usedPercent === 'number' ? window.usedPercent : null;
     const css = used >= 100 ? 'danger' : used >= 80 ? 'warn' : '';
+    const fillValue = used === null ? 0 : Math.min(100, Math.max(0, used));
     return `<div class="quota-row" title="重置：${escapeHTML(formatTime(window.resetAt))}">
       <span class="quota-label">${escapeHTML(window.label)}</span>
-      <span class="quota-track"><span class="quota-fill ${css}" style="width:${used === null ? 0 : Math.min(100, Math.max(0, used))}%"></span></span>
+      <span class="quota-track"><span class="quota-fill ${css}" data-fill="${fillValue}"></span></span>
       <span class="quota-value">${used === null ? '-' : `${used.toFixed(0)}%`}</span>
     </div>`;
   }).join('')}</div>`;
+}
+
+function applyFillWidths(root) {
+  const scope = root || document;
+  scope.querySelectorAll('.quota-fill[data-fill]').forEach((el) => {
+    el.style.width = `${el.dataset.fill}%`;
+  });
 }
 
 function deletionEligibility(account) {
@@ -155,18 +192,22 @@ function updateManagementActions(accounts = filteredAccounts()) {
 function renderAccounts() {
   const accounts = filteredAccounts();
   elements.emptyState.hidden = accounts.length > 0;
+  if (elements.emptyState.dataset.bootError) {
+    elements.emptyState.textContent = '没有符合条件的账号';
+    delete elements.emptyState.dataset.bootError;
+  }
   elements.accountsBody.innerHTML = accounts.map((account) => {
     const eligibility = deletionEligibility(account);
     const selectionCell = adminAuthenticated
       ? `<td class="account-checkbox-cell"><input class="account-checkbox" type="checkbox" data-select-account="${escapeHTML(account.auth_index)}" aria-label="选择 ${escapeHTML(account.name)}" ${selectedAccounts.has(account.auth_index) ? 'checked' : ''} ${eligibility.allowed ? '' : `disabled title="${escapeHTML(eligibility.reason)}"`}></td>`
       : '';
     const operationCell = adminAuthenticated
-      ? `<td class="operation-cell">${eligibility.allowed ? `<button class="button danger-outline account-delete" type="button" data-delete-account="${escapeHTML(account.auth_index)}">删除</button>` : `<span class="undeletable">${escapeHTML(eligibility.reason)}</span>`}</td>`
+      ? `<td class="operation-cell">${eligibility.allowed ? `<button class="btn btn-danger-outline account-delete" type="button" data-delete-account="${escapeHTML(account.auth_index)}">删除</button>` : `<span class="undeletable">${escapeHTML(eligibility.reason)}</span>`}</td>`
       : '';
     return `<tr data-account="${escapeHTML(account.auth_index)}">
       ${selectionCell}
-      <td><div class="account-name">${escapeHTML(account.label || account.email || account.name)}</div>
-        <div class="account-meta">${escapeHTML(account.email || account.name)} · ${escapeHTML(account.auth_index)}</div></td>
+      <td><div class="account-name">${escapeHTML(accountLabel(account))}</div>
+        <div class="account-meta">${escapeHTML(accountMetaText(account))}</div></td>
       <td><span class="provider-tag">${escapeHTML(account.provider)}</span></td>
       <td><span class="state-pill ${escapeHTML(account.effective_state)}">${escapeHTML(stateLabels[account.effective_state] || account.effective_state)}</span></td>
       <td>${escapeHTML(account.plan_type || account.account_type || '-')}</td>
@@ -176,6 +217,7 @@ function renderAccounts() {
       ${operationCell}
     </tr>`;
   }).join('');
+  applyFillWidths(elements.accountsBody);
   updateManagementActions(accounts);
 }
 
@@ -191,13 +233,13 @@ function renderEvents() {
 
 function renderOperations() {
   elements.notificationList.innerHTML = (dashboard.notificationChannels || []).map((channel) => `
-    <div class="notification-row">
-      <div><span>${escapeHTML(channel.name)}</span><small>${channel.configured ? `${channel.enabled ? ' 已启用' : ' 已配置'} · ${channel.targets || 0} 个目标` : ' 未配置'}</small></div>
-      ${adminAuthenticated ? `<button class="button notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>` : ''}
+    <div class="channel-row">
+      <div><strong>${escapeHTML(channel.name)}</strong><small>${channel.configured ? `${channel.enabled ? '已启用' : '已配置'} · ${channel.targets || 0} 个目标` : '未配置'}</small></div>
+      ${adminAuthenticated ? `<button class="btn btn-ghost notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>` : ''}
     </div>`).join('');
   const capabilityLabels = { 'active-quota': '主动额度', 'health-only': '健康状态' };
   elements.capabilityList.innerHTML = Object.entries(dashboard.providerCapabilities || {}).map(([provider, capability]) => `
-    <div class="capability-row"><span>${escapeHTML(provider)}</span><small>${escapeHTML(capabilityLabels[capability] || capability)}</small></div>`).join('');
+    <div class="channel-row"><strong>${escapeHTML(provider)}</strong><small>${escapeHTML(capabilityLabels[capability] || capability)}</small></div>`).join('');
 }
 
 function renderDashboard() {
@@ -208,10 +250,10 @@ function renderDashboard() {
   elements.exhaustedCount.textContent = counts.exhausted || 0;
   elements.unavailableCount.textContent = counts.unavailable || 0;
   const connection = dashboard.connection || {};
-  elements.connectionBadge.className = `status-badge ${connection.connected ? 'connected' : 'disconnected'}`;
+  elements.connectionBadge.className = `pill ${connection.connected ? 'pill-connected' : 'pill-disconnected'}`;
   elements.connectionBadge.textContent = connection.connected ? 'CPA 已连接' : 'CPA 未连接';
   const sync = dashboard.lastAccountSync;
-  elements.lastSync.textContent = sync?.at ? `账号同步 ${formatTime(sync.at)}` : '尚未同步';
+  elements.lastSync.textContent = sync?.at ? `同步于 ${formatTime(sync.at)}` : '尚未同步';
   elements.scheduleText.textContent = `账号每 ${dashboard.schedule.accountSyncSeconds} 秒同步，额度每 ${dashboard.schedule.quotaSyncSeconds} 秒检查`;
   renderProviders();
   renderAccounts();
@@ -267,6 +309,21 @@ async function loadDashboard() {
   renderDashboard();
 }
 
+function startRefresh(text) {
+  refreshing = true;
+  elements.refreshButton.disabled = true;
+  elements.refreshButton.textContent = text || '同步中...';
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(endRefresh, 60000);
+}
+
+function endRefresh() {
+  refreshing = false;
+  clearTimeout(refreshTimer);
+  elements.refreshButton.disabled = false;
+  elements.refreshButton.textContent = '立即同步';
+}
+
 function connectSSE() {
   eventSource?.close();
   eventSource = new EventSource('/api/stream');
@@ -279,13 +336,19 @@ function connectSSE() {
     loadDashboard().catch(() => {});
   });
   eventSource.addEventListener('quota:progress', (event) => {
-    if (!adminAuthenticated) return;
+    if (!adminAuthenticated || !refreshing) return;
     const progress = JSON.parse(event.data);
-    elements.refreshButton.textContent = `检查中 ${progress.completed}/${progress.total}`;
+    elements.refreshButton.textContent = `同步中 ${progress.completed}/${progress.total}`;
+    clearTimeout(refreshTimer);
+    if (progress.completed >= progress.total) {
+      refreshTimer = setTimeout(endRefresh, 1500);
+    } else {
+      refreshTimer = setTimeout(endRefresh, 10000);
+    }
   });
   eventSource.onerror = () => {
-    elements.connectionBadge.className = 'status-badge unknown';
-    elements.connectionBadge.textContent = '页面连接重试中';
+    elements.connectionBadge.className = 'pill pill-muted';
+    elements.connectionBadge.textContent = '重连中';
   };
 }
 
@@ -293,14 +356,15 @@ function openDrawer(authIndex) {
   const account = dashboard.accounts.find((item) => item.auth_index === authIndex);
   if (!account) return;
   elements.drawerProvider.textContent = account.provider;
-  elements.drawerTitle.textContent = account.label || account.email || account.name;
+  elements.drawerTitle.textContent = accountLabel(account);
   const summary = account.quotaSummary || {};
+  const authFile = maskIfNeeded(account.name || '-');
   elements.drawerContent.innerHTML = `
     <div class="detail-grid">
       <div class="detail-item"><span>状态</span><strong>${escapeHTML(stateLabels[account.effective_state] || account.effective_state)}</strong></div>
       <div class="detail-item"><span>CPA 状态</span><strong>${escapeHTML(account.cpa_status || '-')}</strong></div>
       <div class="detail-item"><span>Auth Index</span><strong>${escapeHTML(account.auth_index)}</strong></div>
-      <div class="detail-item"><span>认证文件</span><strong>${escapeHTML(account.name || '-')}</strong></div>
+      <div class="detail-item"><span>认证文件</span><strong>${escapeHTML(authFile)}</strong></div>
       <div class="detail-item"><span>来源</span><strong>${escapeHTML(account.metadata?.source || 'unknown')}</strong></div>
       <div class="detail-item"><span>计划</span><strong>${escapeHTML(account.plan_type || account.account_type || '-')}</strong></div>
       <div class="detail-item"><span>成功 / 失败</span><strong>${account.success_count || 0} / ${account.failed_count || 0}</strong></div>
@@ -312,7 +376,8 @@ function openDrawer(authIndex) {
     ${(account.quotaWindows || []).length ? account.quotaWindows.map((window) => `
       <div class="drawer-quota"><header><strong>${escapeHTML(window.label)}</strong><span>${typeof window.usedPercent === 'number' ? `${window.usedPercent.toFixed(1)}%` : '-'}</span></header>
       ${quotaHTML({ quotaWindows: [window] }, 1)}<small>重置：${escapeHTML(formatTime(window.resetAt))}</small></div>`).join('') : '<p class="quota-unknown">暂无主动额度数据</p>'}
-    ${Object.keys(summary).length ? `<h3>摘要</h3><pre>${escapeHTML(JSON.stringify(summary, null, 2))}</pre>` : ''}`;
+    ${adminAuthenticated && Object.keys(summary).length ? `<h3>摘要</h3><pre>${escapeHTML(JSON.stringify(summary, null, 2))}</pre>` : ''}`;
+  applyFillWidths(elements.drawerContent);
   elements.accountDrawer.hidden = false;
 }
 
@@ -329,6 +394,8 @@ elements.loginForm.addEventListener('submit', async (event) => {
     connectSSE();
   } catch (error) {
     elements.loginError.textContent = error.message;
+    elements.password.value = '';
+    elements.password.focus();
   }
 });
 
@@ -338,19 +405,14 @@ elements.logoutButton.addEventListener('click', async () => {
 });
 
 elements.refreshButton.addEventListener('click', async () => {
-  if (!adminAuthenticated) return;
-  elements.refreshButton.disabled = true;
-  elements.refreshButton.textContent = '已提交';
+  if (!adminAuthenticated || refreshing) return;
+  startRefresh('已提交...');
   try {
     await api('/api/refresh', { method: 'POST', body: JSON.stringify({ quota: true }) });
     showToast('后台已开始同步账号和额度');
   } catch (error) {
     showToast(error.message);
-  } finally {
-    setTimeout(() => {
-      elements.refreshButton.disabled = false;
-      elements.refreshButton.innerHTML = '<span aria-hidden="true">↻</span> 立即同步';
-    }, 1500);
+    endRefresh();
   }
 });
 
@@ -368,7 +430,7 @@ elements.accountsBody.addEventListener('click', (event) => {
   const deleteButton = event.target.closest('[data-delete-account]');
   if (deleteButton) {
     const account = dashboard.accounts.find((item) => item.auth_index === deleteButton.dataset.deleteAccount);
-    deleteAccounts([deleteButton.dataset.deleteAccount], `账号 ${account?.label || account?.email || account?.name || ''}`);
+    deleteAccounts([deleteButton.dataset.deleteAccount], `账号 ${accountLabel(account)}`);
     return;
   }
   if (event.target.closest('button, input, a')) return;
@@ -390,6 +452,9 @@ elements.deleteSelectedButton.addEventListener('click', () => {
 elements.deleteAbnormalButton.addEventListener('click', deleteAbnormalAccounts);
 elements.drawerBackdrop.addEventListener('click', closeDrawer);
 elements.drawerClose.addEventListener('click', closeDrawer);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !elements.accountDrawer.hidden) closeDrawer();
+});
 elements.notificationList.addEventListener('click', async (event) => {
   const button = event.target.closest('.notification-test');
   if (!button || !adminAuthenticated) return;
@@ -415,4 +480,12 @@ async function boot() {
   connectSSE();
 }
 
-boot().catch((error) => showToast(error.message));
+boot().catch((error) => {
+  if (!elements.loginView.hidden) return;
+  elements.app.hidden = false;
+  elements.accountsBody.innerHTML = '';
+  elements.emptyState.hidden = false;
+  elements.emptyState.dataset.bootError = '1';
+  elements.emptyState.textContent = `加载失败：${error.message}`;
+  showToast(error.message);
+});
