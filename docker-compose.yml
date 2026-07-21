@@ -20,5 +20,7 @@ services:
       PUSHPLUS_TOPIC: ${PUSHPLUS_TOPIC:-}
       PUSHPLUS_CHANNEL: ${PUSHPLUS_CHANNEL:-wechat}
     volumes:
-      - ./data:/data
+      - cpa-status-data:/data
 
+volumes:
+  cpa-status-data:

@@ -140,9 +140,29 @@ function decodeAccount(row) {
 export class Store {
   constructor(databasePath) {
     if (databasePath !== ':memory:') {
-      fs.mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
+      const directory = path.dirname(path.resolve(databasePath));
+      try {
+        fs.mkdirSync(directory, { recursive: true });
+        fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK);
+        if (fs.existsSync(databasePath)) {
+          fs.accessSync(databasePath, fs.constants.R_OK | fs.constants.W_OK);
+        }
+      } catch (error) {
+        const uid = typeof process.getuid === 'function' ? process.getuid() : 'unknown';
+        throw new Error(
+          `Database path is not writable: ${databasePath} (directory: ${directory}, uid: ${uid}). ` +
+          'Fix the mounted volume ownership or use the named volume from docker-compose.yml.',
+          { cause: error }
+        );
+      }
     }
-    this.db = new DatabaseSync(databasePath);
+    try {
+      this.db = new DatabaseSync(databasePath);
+    } catch (error) {
+      throw new Error(`Unable to open SQLite database at ${databasePath}: ${error.message}`, {
+        cause: error,
+      });
+    }
     this.db.exec(migrations);
   }
 

@@ -85,7 +85,21 @@ Smoke test 会启动一个模拟 CLIProxyAPI 和真实 CPA Status HTTP 服务，
 docker compose up -d --build
 ```
 
-SQLite 数据保存到 `./data/cpa-status.db`。容器使用 Node.js 22 内置 SQLite，不需要额外数据库服务。
+SQLite 数据保存在 Docker 命名卷 `cpa-status-data` 中。容器启动时会检查并修正数据目录权限，然后以非 root UID/GID 运行服务。容器使用 Node.js 22 内置 SQLite，不需要额外数据库服务。
+
+若自行使用宿主机绑定目录，例如 `-v /opt/cpa-status/data:/data`，启动器也会尝试将目录调整为 `DATA_UID`/`DATA_GID`，默认均为 `1000`。受限文件系统不允许 `chown` 时，可在宿主机执行：
+
+```bash
+sudo mkdir -p /opt/cpa-status/data
+sudo chown -R 1000:1000 /opt/cpa-status/data
+```
+
+遇到旧容器反复输出 `unable to open database file` 时，重新构建并创建容器：
+
+```bash
+docker compose down
+docker compose up -d --build
+```
 
 ## 安全边界
 
