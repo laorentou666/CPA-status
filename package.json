@@ -1,0 +1,16 @@
+{
+  "name": "cpa-status",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLIProxyAPI account health, quota and notification monitor",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/main.js",
+    "test": "node --disable-warning=ExperimentalWarning --test --experimental-test-isolation=none --test-concurrency=1 tests/*.test.js",
+    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke-test.js"
+  }
+}
