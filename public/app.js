@@ -192,7 +192,7 @@ function renderEvents() {
 function renderOperations() {
   elements.notificationList.innerHTML = (dashboard.notificationChannels || []).map((channel) => `
     <div class="notification-row">
-      <div><span>${escapeHTML(channel.name)}</span><small>${channel.configured ? (channel.enabled ? ' 已启用' : ' 已配置') : ' 未配置'}</small></div>
+      <div><span>${escapeHTML(channel.name)}</span><small>${channel.configured ? `${channel.enabled ? ' 已启用' : ' 已配置'} · ${channel.targets || 0} 个目标` : ' 未配置'}</small></div>
       ${adminAuthenticated ? `<button class="button notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>` : ''}
     </div>`).join('');
   const capabilityLabels = { 'active-quota': '主动额度', 'health-only': '健康状态' };

@@ -24,6 +24,59 @@ function list(env, name) {
     .filter(Boolean);
 }
 
+function indexedValues(env, baseName) {
+  const values = [];
+  if (String(env[baseName] || '').trim()) {
+    values.push({ index: 0, name: baseName, value: String(env[baseName]).trim() });
+  }
+  const pattern = new RegExp(`^${baseName}_([1-9]\\d*)$`);
+  for (const [name, rawValue] of Object.entries(env)) {
+    const match = name.match(pattern);
+    const value = String(rawValue || '').trim();
+    if (!match || !value) continue;
+    values.push({ index: Number(match[1]), name, value });
+  }
+  return values.sort((left, right) => left.index - right.index);
+}
+
+function indexedName(baseName, index) {
+  return index === 0 ? baseName : `${baseName}_${index}`;
+}
+
+function telegramConfig(env) {
+  const targets = indexedValues(env, 'TELEGRAM_BOT_TOKEN').map(({ index, value }) => ({
+    botToken: value,
+    chatIds: list(env, indexedName('TELEGRAM_CHAT_IDS', index)),
+  }));
+  return {
+    botToken: targets[0]?.botToken || '',
+    chatIds: targets[0]?.chatIds || [],
+    targets,
+  };
+}
+
+function pushPlusConfig(env) {
+  const targets = indexedValues(env, 'PUSHPLUS_TOKEN').map(({ index, value }) => ({
+    token: value,
+    topic: env[indexedName('PUSHPLUS_TOPIC', index)] || '',
+    channel: env[indexedName('PUSHPLUS_CHANNEL', index)] || env.PUSHPLUS_CHANNEL || 'wechat',
+  }));
+  return {
+    token: targets[0]?.token || '',
+    topic: targets[0]?.topic || '',
+    channel: targets[0]?.channel || env.PUSHPLUS_CHANNEL || 'wechat',
+    targets,
+  };
+}
+
+function serverChanConfig(env) {
+  const sendKeys = indexedValues(env, 'SERVERCHAN_SENDKEY').map(({ value }) => value);
+  return {
+    sendKey: sendKeys[0] || '',
+    sendKeys,
+  };
+}
+
 function normalizeManagementURL(value) {
   const raw = String(value || 'http://127.0.0.1:8317/v0/management').trim();
   const url = new URL(raw);
@@ -56,18 +109,9 @@ export function loadConfig(overrides = {}, env = process.env) {
     sessionTtlMs: integer(env, 'SESSION_TTL_HOURS', 24, 1, 720) * 60 * 60 * 1000,
     notifyChannels: list(env, 'NOTIFY_CHANNELS').map((item) => item.toLowerCase()),
     notifyMinSeverity: (env.NOTIFY_MIN_SEVERITY || 'warning').toLowerCase(),
-    telegram: {
-      botToken: env.TELEGRAM_BOT_TOKEN || '',
-      chatIds: list(env, 'TELEGRAM_CHAT_IDS'),
-    },
-    pushplus: {
-      token: env.PUSHPLUS_TOKEN || '',
-      topic: env.PUSHPLUS_TOPIC || '',
-      channel: env.PUSHPLUS_CHANNEL || 'wechat',
-    },
-    serverchan: {
-      sendKey: env.SERVERCHAN_SENDKEY || '',
-    },
+    telegram: telegramConfig(env),
+    pushplus: pushPlusConfig(env),
+    serverchan: serverChanConfig(env),
   };
   return { ...config, ...overrides };
 }

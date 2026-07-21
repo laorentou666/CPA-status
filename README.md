@@ -94,15 +94,31 @@ CONFIG_FILE=/etc/cpa-status.env npm start
 NOTIFY_CHANNELS=telegram,pushplus,serverchan
 ```
 
-`NOTIFY_MIN_SEVERITY` 决定最低通知级别：
+每个事件会根据实际情况标记为以下级别：
 
-| 值 | 发送范围 |
+| 事件级别 | 当前对应情况 |
 | --- | --- |
-| `info` | 普通信息、警告、严重事件 |
-| `warning` | 警告和严重事件，默认值 |
-| `critical` | 只发送严重事件 |
+| `info` | 账号数量增加；账号从异常状态恢复为正常；CPA 连接恢复；其他不代表明确故障的状态信息 |
+| `warning` | 额度使用达到 `QUOTA_WARNING_PERCENT` 但尚未耗尽；最近至少 3 次请求且失败率达到 50%；账号被限流、禁用、不可用或从列表移除；账号数量减少 |
+| `critical` | 认证失效、Token 过期或被撤销；额度达到 100% 或 Provider 明确报告额度耗尽；CPA 管理接口无法连接 |
 
-账号恢复和 CPA 恢复事件始终发送，不受最低级别限制。
+启动后的首次检查如果发现多个异常账号：只包含警告类状态时记为 `warning`；其中包含认证失效或额度耗尽时记为 `critical`。
+
+`NOTIFY_MIN_SEVERITY` 是发送门槛：
+
+| 配置值 | 实际发送范围 |
+| --- | --- |
+| `info` | 发送 `info`、`warning`、`critical` 全部事件 |
+| `warning` | 发送 `warning`、`critical`，这是默认值 |
+| `critical` | 只发送 `critical` |
+
+`account_recovered` 和 `cpa_recovered` 两类恢复事件始终发送，即使门槛设置为 `warning` 或 `critical`，也不会错过恢复通知。
+
+### 多接收人和多凭证
+
+三个通知渠道都支持多个凭证。第一个凭证继续使用原变量名，更多凭证添加相同数字后缀，例如 `_2`、`_3`。修改后同样支持热加载。
+
+页面会显示每个渠道当前有效的目标数量。管理员页的“测试”按钮会向该渠道配置的全部接收目标发送测试消息。只要其中一个目标发送失败，该渠道测试会显示失败，但其他成功目标仍可能已经收到消息。
 
 ### Telegram
 
@@ -110,11 +126,16 @@ NOTIFY_CHANNELS=telegram,pushplus,serverchan
 NOTIFY_CHANNELS=telegram
 TELEGRAM_BOT_TOKEN=123456:bot-token
 TELEGRAM_CHAT_IDS=10001,10002
+
+TELEGRAM_BOT_TOKEN_2=654321:another-bot-token
+TELEGRAM_CHAT_IDS_2=20001,20002
 ```
 
 - `TELEGRAM_BOT_TOKEN`：从 [@BotFather](https://t.me/BotFather) 创建机器人后获得。
 - `TELEGRAM_CHAT_IDS`：接收人的 Chat ID，多个 ID 使用英文逗号分隔。
-- 发送接口采用 Telegram 官方 `sendMessage`，同一事件会发送给全部 Chat ID。
+- 同一个机器人推给多人时，只需在同一个 `TELEGRAM_CHAT_IDS` 中填写多个 ID。
+- 使用多个机器人时，Token 和 Chat ID 必须使用相同后缀配对，例如 `TELEGRAM_BOT_TOKEN_2` 对应 `TELEGRAM_CHAT_IDS_2`。
+- 发送接口采用 Telegram 官方 `sendMessage`，同一事件会发送给全部已配置目标。
 
 官方文档：<https://core.telegram.org/bots/api#sendmessage>
 
@@ -125,11 +146,16 @@ NOTIFY_CHANNELS=pushplus
 PUSHPLUS_TOKEN=your-token
 PUSHPLUS_TOPIC=
 PUSHPLUS_CHANNEL=wechat
+
+PUSHPLUS_TOKEN_2=another-token
+PUSHPLUS_TOPIC_2=
+PUSHPLUS_CHANNEL_2=wechat
 ```
 
 - `PUSHPLUS_TOKEN`：PushPlus 用户 Token。
 - `PUSHPLUS_TOPIC`：群组编码，可选；留空时发送给 Token 所属用户。
 - `PUSHPLUS_CHANNEL`：发送渠道，默认 `wechat`。
+- 更多用户使用 `PUSHPLUS_TOKEN_2`、`PUSHPLUS_TOKEN_3`，对应的 Topic 和 Channel 使用相同后缀。
 - 消息使用官方 `/send` 接口和 `html` 模板。
 
 官方文档：<https://www.pushplus.plus/doc/>
@@ -139,12 +165,14 @@ PUSHPLUS_CHANNEL=wechat
 ```env
 NOTIFY_CHANNELS=serverchan
 SERVERCHAN_SENDKEY=SCTxxxxxxxx
+SERVERCHAN_SENDKEY_2=sctp123tyyyyyyyy
 ```
 
 `SERVERCHAN_SENDKEY` 支持两种官方格式：
 
 - Server酱 Turbo：以 `SCT` 开头，调用 `https://sctapi.ftqq.com/{SendKey}.send`。
 - Server酱³：格式为 `sctp{uid}t...`，调用 `https://{uid}.push.ft07.com/send/{SendKey}.send`。
+- 更多接收人使用 `SERVERCHAN_SENDKEY_2`、`SERVERCHAN_SENDKEY_3`，Turbo 和 Server酱³ Key 可以混合配置。
 
 请求使用官方文档规定的 `title` 和 Markdown `desp` 参数，只有返回 JSON 的 `code` 为 `0` 才记录为发送成功。SendKey 不会写入日志或返回前端。
 
@@ -162,12 +190,18 @@ NOTIFY_MIN_SEVERITY=warning
 
 TELEGRAM_BOT_TOKEN=123456:bot-token
 TELEGRAM_CHAT_IDS=10001,10002
+TELEGRAM_BOT_TOKEN_2=654321:another-bot-token
+TELEGRAM_CHAT_IDS_2=20001
 
 PUSHPLUS_TOKEN=your-token
 PUSHPLUS_TOPIC=
 PUSHPLUS_CHANNEL=wechat
+PUSHPLUS_TOKEN_2=another-token
+PUSHPLUS_TOPIC_2=
+PUSHPLUS_CHANNEL_2=wechat
 
 SERVERCHAN_SENDKEY=SCTxxxxxxxx
+SERVERCHAN_SENDKEY_2=sctp123tyyyyyyyy
 ```
 
 修改并保存 `.env` 后无需重启。进入 `/admin`，可在“通知渠道”区域分别发送测试消息。

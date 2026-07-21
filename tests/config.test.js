@@ -4,7 +4,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
-import { ConfigManager } from '../src/config.js';
+import { ConfigManager, loadConfig } from '../src/config.js';
+
+test('loadConfig groups numbered notification credentials by channel', () => {
+  const config = loadConfig({}, {
+    TELEGRAM_BOT_TOKEN: 'bot-one',
+    TELEGRAM_CHAT_IDS: '1001,1002',
+    TELEGRAM_BOT_TOKEN_2: 'bot-two',
+    TELEGRAM_CHAT_IDS_2: '2001',
+    PUSHPLUS_TOKEN: 'push-one',
+    PUSHPLUS_TOPIC: 'ops',
+    PUSHPLUS_TOKEN_2: 'push-two',
+    PUSHPLUS_CHANNEL_2: 'webhook',
+    SERVERCHAN_SENDKEY: 'SCTone',
+    SERVERCHAN_SENDKEY_2: 'sctp123ttwo',
+  });
+
+  assert.deepEqual(config.telegram.targets, [
+    { botToken: 'bot-one', chatIds: ['1001', '1002'] },
+    { botToken: 'bot-two', chatIds: ['2001'] },
+  ]);
+  assert.deepEqual(config.pushplus.targets, [
+    { token: 'push-one', topic: 'ops', channel: 'wechat' },
+    { token: 'push-two', topic: '', channel: 'webhook' },
+  ]);
+  assert.deepEqual(config.serverchan.sendKeys, ['SCTone', 'sctp123ttwo']);
+});
 
 test('ConfigManager watches .env changes and preserves startup-only settings', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-status-config-'));

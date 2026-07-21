@@ -19,17 +19,31 @@ export class TelegramNotifier {
     this.fetch = fetchImpl;
   }
 
+  targets() {
+    const targets = Array.isArray(this.config.targets) && this.config.targets.length
+      ? this.config.targets
+      : [this.config];
+    return targets.filter((target) => target.botToken && target.chatIds?.length);
+  }
+
   configured() {
-    return Boolean(this.config.botToken && this.config.chatIds?.length);
+    return this.targets().length > 0;
+  }
+
+  targetCount() {
+    return this.targets().reduce((total, target) => total + target.chatIds.length, 0);
   }
 
   async send(event) {
     if (!this.configured()) throw new Error('Telegram is not configured');
-    const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
     const text = `<b>${escapeHTML(event.title)}</b>\n${escapeHTML(event.message)}\n\n级别: ${escapeHTML(event.severity)}`;
+    const deliveries = this.targets().flatMap((target) => target.chatIds.map((chatId) => ({
+      botToken: target.botToken,
+      chatId,
+    })));
     const results = await Promise.allSettled(
-      this.config.chatIds.map(async (chatId) => {
-        const response = await this.fetch(url, {
+      deliveries.map(async ({ botToken, chatId }) => {
+        const response = await this.fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
@@ -53,8 +67,19 @@ export class PushPlusNotifier {
     this.fetch = fetchImpl;
   }
 
+  targets() {
+    const targets = Array.isArray(this.config.targets) && this.config.targets.length
+      ? this.config.targets
+      : [this.config];
+    return targets.filter((target) => target.token);
+  }
+
   configured() {
-    return Boolean(this.config.token);
+    return this.targets().length > 0;
+  }
+
+  targetCount() {
+    return this.targets().length;
   }
 
   async send(event) {
@@ -64,25 +89,31 @@ export class PushPlusNotifier {
       `<p><strong>级别：</strong>${escapeHTML(event.severity)}</p>`,
       `<p><strong>时间：</strong>${escapeHTML(event.createdAt || new Date().toISOString())}</p>`,
     ].join('');
-    const payload = {
-      token: this.config.token,
-      title: `[CPA Status] ${event.title}`,
-      content,
-      template: 'html',
-      channel: this.config.channel || 'wechat',
-    };
-    if (this.config.topic) payload.topic = this.config.topic;
-    const response = await this.fetch('https://www.pushplus.plus/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await response.text();
-    if (!response.ok) throw new Error(`PushPlus HTTP ${response.status}: ${truncate(body)}`);
-    const parsed = body ? JSON.parse(body) : {};
-    if (parsed.code !== undefined && Number(parsed.code) !== 200) {
-      throw new Error(`PushPlus: ${truncate(parsed.msg || parsed.data || body)}`);
+    const results = await Promise.allSettled(this.targets().map(async (target) => {
+      const payload = {
+        token: target.token,
+        title: `[CPA Status] ${event.title}`,
+        content,
+        template: 'html',
+        channel: target.channel || 'wechat',
+      };
+      if (target.topic) payload.topic = target.topic;
+      const response = await this.fetch('https://www.pushplus.plus/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`PushPlus HTTP ${response.status}: ${truncate(body)}`);
+      const parsed = body ? JSON.parse(body) : {};
+      if (parsed.code !== undefined && Number(parsed.code) !== 200) {
+        throw new Error(`PushPlus: ${truncate(parsed.msg || parsed.data || body)}`);
+      }
+    }));
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length) {
+      throw new Error(failed.map((result) => result.reason?.message).join('; '));
     }
   }
 }
@@ -106,8 +137,19 @@ export class ServerChanNotifier {
     this.fetch = fetchImpl;
   }
 
+  sendKeys() {
+    if (Array.isArray(this.config.sendKeys) && this.config.sendKeys.length) {
+      return this.config.sendKeys.filter(Boolean);
+    }
+    return this.config.sendKey ? [this.config.sendKey] : [];
+  }
+
   configured() {
-    return Boolean(this.config.sendKey);
+    return this.sendKeys().length > 0;
+  }
+
+  targetCount() {
+    return this.sendKeys().length;
   }
 
   async send(event) {
@@ -118,22 +160,28 @@ export class ServerChanNotifier {
       `**级别：** ${event.severity}`,
       `**时间：** ${event.createdAt || new Date().toISOString()}`,
     ].filter(Boolean).join('\n\n');
-    const response = await this.fetch(serverChanEndpoint(this.config.sendKey), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, desp }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await response.text();
-    if (!response.ok) throw new Error(`ServerChan HTTP ${response.status}: ${truncate(body)}`);
-    let parsed;
-    try {
-      parsed = body ? JSON.parse(body) : {};
-    } catch {
-      throw new Error(`ServerChan returned invalid JSON: ${truncate(body)}`);
-    }
-    if (Number(parsed.code) !== 0) {
-      throw new Error(`ServerChan: ${truncate(parsed.message || parsed.data || body)}`);
+    const results = await Promise.allSettled(this.sendKeys().map(async (sendKey) => {
+      const response = await this.fetch(serverChanEndpoint(sendKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, desp }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`ServerChan HTTP ${response.status}: ${truncate(body)}`);
+      let parsed;
+      try {
+        parsed = body ? JSON.parse(body) : {};
+      } catch {
+        throw new Error(`ServerChan returned invalid JSON: ${truncate(body)}`);
+      }
+      if (Number(parsed.code) !== 0) {
+        throw new Error(`ServerChan: ${truncate(parsed.message || parsed.data || body)}`);
+      }
+    }));
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length) {
+      throw new Error(failed.map((result) => result.reason?.message).join('; '));
     }
   }
 }
@@ -160,6 +208,7 @@ export class NotificationService {
       name: notifier.name,
       enabled: this.enabled.has(notifier.name),
       configured: notifier.configured(),
+      targets: notifier.targetCount(),
     }));
   }
 

@@ -184,7 +184,7 @@ test('.env reload updates live scheduling, notification and administrator settin
   assert.equal(app.cpaClient.timeoutMs, 12_000);
   assert.deepEqual(
     dashboard.notificationChannels.find((channel) => channel.name === 'serverchan'),
-    { name: 'serverchan', enabled: true, configured: true }
+    { name: 'serverchan', enabled: true, configured: true, targets: 1 }
   );
 
   const oldSessionMutation = await fetch(`${baseURL}/api/refresh`, {
