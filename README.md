@@ -73,7 +73,7 @@ CONFIG_FILE=/etc/cpa-status.env npm start
 - `REQUEST_TIMEOUT_SECONDS`、`HISTORY_RETENTION_DAYS`
 - `APP_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`
 - OAuth、上传、登录限流与上传大小限制
-- 全部通知渠道和通知凭证
+- 全部通知渠道、通知事件列表和通知凭证
 
 具体行为：
 
@@ -97,27 +97,33 @@ CONFIG_FILE=/etc/cpa-status.env npm start
 NOTIFY_CHANNELS=telegram,pushplus,serverchan
 ```
 
-每个事件会根据实际情况标记为以下级别：
+通知不再使用 `info`、`warning`、`critical` 等等级过滤。`NOTIFY_EVENTS` 直接指定允许发送的事件，多个事件使用英文逗号分隔；设置为 `all` 会发送全部事件，设置为 `none` 或留空会关闭所有自动事件通知。通知测试不受该列表限制。
 
-| 事件级别 | 当前对应情况 |
+```env
+NOTIFY_EVENTS=account_auth_invalid,account_disabled,account_quota_exhausted,cpa_unreachable
+```
+
+未配置 `NOTIFY_EVENTS` 时会使用兼容默认值：明确认证/封禁/额度异常、明确异常恢复、账号移除、启动异常快照、CPA 失联/恢复及删除失败。`.env.example` 已显式列出这个默认集合。
+
+| 事件键 | 触发条件 |
 | --- | --- |
-| `info` | 明确异常账号恢复为正常；CPA 连接恢复；其他不代表明确故障的系统信息 |
-| `warning` | 账号被限流（HTTP 429）；明确禁用；账号从列表移除；账号数量减少 |
-| `critical` | HTTP 401 或结构化错误明确表示认证失效/账号停用；额度达到 100% 或 Provider 明确报告额度耗尽；CPA 管理接口无法连接 |
+| `account_auth_invalid` | HTTP 401 或结构化错误明确表示认证失效 |
+| `account_disabled` | 响应明确表示账号、团队或服务被禁用/封禁 |
+| `account_quota_exhausted` | 额度达到 100% 或 Provider 明确报告额度耗尽 |
+| `account_rate_limited` | 上游返回 HTTP 429 |
+| `account_unavailable` | CPA 将账号标记为不可用 |
+| `account_warning` | 最近请求失败率进入警告状态 |
+| `account_unknown` | 账号状态变为未知 |
+| `account_healthy` | 普通未知、不可用或警告状态恢复正常 |
+| `account_recovered` | 认证失效、禁用、额度耗尽或限流恢复正常 |
+| `account_removed` | 单个账号从 CPA `/auth-files` 列表消失 |
+| `account_count_increased` / `account_count_decreased` | CPA 账号数量增加/减少 |
+| `initial_unhealthy_accounts` | 启动检查发现明确异常账号 |
+| `cpa_unreachable` / `cpa_recovered` | CPA 管理接口失联/恢复 |
+| `account_deleted` | 主动删除账号成功 |
+| `account_delete_partial` / `account_delete_failed` | 主动删除部分失败/完全失败 |
 
-启动后的首次检查如果发现多个异常账号：只包含警告类状态时记为 `warning`；其中包含认证失效或额度耗尽时记为 `critical`。
-
-`NOTIFY_MIN_SEVERITY` 是发送门槛：
-
-| 配置值 | 实际发送范围 |
-| --- | --- |
-| `info` | 发送 `info`、`warning`、`critical` 全部事件 |
-| `warning` | 发送 `warning`、`critical`，这是默认值 |
-| `critical` | 只发送 `critical` |
-
-`account_recovered` 和 `cpa_recovered` 两类恢复事件始终发送，即使门槛设置为 `warning` 或 `critical`，也不会错过恢复通知。
-
-额度检查只会把明确的认证、停用和额度错误升级为账号告警。`context canceled`、超时、连接重置、CPA HTTP 502、上游 408/500/502/503/504、普通 403、空响应和非法 JSON 都按临时探测失败处理：保留上一次账号状态，仅记录检查错误，不发送微信通知。新账号加入导致的数量增加也不发送通知；账号移除和数量减少仍会告警。
+额度检查只会把明确的认证、停用和额度错误升级为账号异常。`context canceled`、超时、连接重置、CPA HTTP 502、上游 408/500/502/503/504、普通 403、空响应和非法 JSON 都按临时探测失败处理：保留上一次账号状态，仅记录检查错误，不生成账号状态变化通知。兼容默认事件集合不包含普通 `account_unavailable`、`account_unknown`、`account_warning` 和账号数量增加；需要这些通知时可自行加入 `NOTIFY_EVENTS`。
 
 CLIProxyAPI v7.2.29 的 `/api-call` 使用 HTTP 200 包装真实上游状态，实际状态位于响应的 `status_code` 字段。项目不会把所有 403 视为认证失效；只有 401、结构化 `account_deactivated`/`unauthorized`/`invalid_grant` 等错误，或响应明确包含账号停用/服务禁用信息时，才会判定账号异常。429 按 CLIProxyAPI 语义记录为额度耗尽/限流。
 
@@ -193,7 +199,7 @@ SERVERCHAN_SENDKEY_2=sctp123tyyyyyyyy
 
 ```env
 NOTIFY_CHANNELS=telegram,pushplus,serverchan
-NOTIFY_MIN_SEVERITY=warning
+NOTIFY_EVENTS=account_auth_invalid,account_disabled,account_quota_exhausted,cpa_unreachable
 
 TELEGRAM_BOT_TOKEN=123456:bot-token
 TELEGRAM_CHAT_IDS=10001,10002

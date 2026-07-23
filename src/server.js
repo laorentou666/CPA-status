@@ -365,6 +365,7 @@ export function createHTTPServer({
         return json(response, 200, {
           ...store.getDashboard(),
           notificationChannels: notifications.status(),
+          notificationEvents: notifications.eventStatus(),
           providerCapabilities: providers.capabilities(),
           schedule: {
             accountSyncSeconds: config.accountSyncIntervalMs / 1000,

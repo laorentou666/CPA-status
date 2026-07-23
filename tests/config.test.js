@@ -51,6 +51,16 @@ test('loadConfig reads public write protection limits', () => {
   assert.equal(config.uploadMaxFiles, 3);
 });
 
+test('loadConfig accepts exact notification event selections and all/none aliases', () => {
+  assert.deepEqual(
+    loadConfig({}, { NOTIFY_EVENTS: 'account_auth_invalid,cpa_unreachable,unknown-key' }).notifyEvents,
+    ['account_auth_invalid', 'cpa_unreachable']
+  );
+  assert.equal(loadConfig({}, { NOTIFY_EVENTS: 'all' }).notifyEvents.length, 18);
+  assert.deepEqual(loadConfig({}, { NOTIFY_EVENTS: 'none' }).notifyEvents, []);
+  assert.deepEqual(loadConfig({}, { NOTIFY_EVENTS: '' }).notifyEvents, []);
+});
+
 test('ConfigManager watches .env changes and preserves startup-only settings', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-status-config-'));
   const filePath = path.join(directory, '.env');

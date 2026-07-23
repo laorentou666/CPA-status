@@ -1,4 +1,4 @@
-const severity = {
+const stateRank = {
   healthy: 0,
   unknown: 1,
   warning: 2,
@@ -69,14 +69,6 @@ export function combineStates(baseState, quotaState) {
   if (baseState === 'missing') return 'missing';
   if (quotaState === 'unknown') return baseState;
   if (baseState === 'unknown') return quotaState;
-  if ((severity[baseState] ?? 1) >= (severity[quotaState] ?? 1)) return baseState;
+  if ((stateRank[baseState] ?? 1) >= (stateRank[quotaState] ?? 1)) return baseState;
   return quotaState;
-}
-
-export function stateSeverity(state) {
-  if (['auth_invalid', 'quota_exhausted'].includes(state)) return 'critical';
-  if (['disabled', 'unavailable', 'missing', 'warning', 'rate_limited'].includes(state)) {
-    return 'warning';
-  }
-  return 'info';
 }

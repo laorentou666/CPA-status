@@ -163,7 +163,7 @@ export class MonitorScheduler {
       }
 
       const previousCount = this.store.getState('last_account_count', null);
-      if (previousCount !== null && unexpectedMissing > 0) {
+      if (previousCount !== null && (files.length > previousCount || unexpectedMissing > 0)) {
         await this.alerts.accountCountChanged(previousCount, files.length);
       }
       this.store.setState('last_account_count', files.length);

@@ -235,7 +235,7 @@ select.input { padding-right: 28px; cursor: pointer; }
 .events-list { max-height: 380px; overflow: auto; }
 
 .event-row {
-  display: grid; grid-template-columns: 72px 1fr auto; gap: 10px; align-items: start;
+  display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start;
   padding: 10px 0; border-bottom: 1px solid var(--border);
 }
 .event-row:last-child { border-bottom: 0; }
@@ -251,6 +251,7 @@ select.input { padding-right: 28px; cursor: pointer; }
 .channel-row strong { font-size: 0.82rem; font-weight: 600; }
 .channel-row small { display: block; color: var(--muted); font-size: 0.72rem; margin-top: 2px; }
 .channel-row .btn { min-height: 28px; padding: 0 10px; font-size: 0.75rem; }
+.notification-events { max-height: 320px; overflow: auto; }
 
 /* ===== Empty state ===== */
 .empty-state { padding: 36px 20px; text-align: center; color: var(--muted); font-size: 0.85rem; }
@@ -383,8 +384,8 @@ select.input { padding-right: 28px; cursor: pointer; }
   .topbar-actions { gap: 6px; }
   .btn { padding: 0 10px; font-size: 0.8rem; }
   .detail-grid { grid-template-columns: 1fr; }
-  .event-row { grid-template-columns: 64px 1fr; }
-  .event-time { grid-column: 2; }
+  .event-row { grid-template-columns: 1fr; }
+  .event-time { grid-column: 1; }
   .oauth-link-row, .upload-picker { align-items: stretch; flex-direction: column; }
   .oauth-link-row .btn, .upload-picker .btn { width: 100%; }
 }

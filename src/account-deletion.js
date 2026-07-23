@@ -52,7 +52,6 @@ export class AccountDeletionService {
     } catch (error) {
       await this.alerts.emit({
         type: 'account_delete_failed',
-        severity: 'warning',
         title: 'CPA 账号删除失败',
         message: `请求删除 ${deletable.length} 个账号失败：${truncate(error.message, 240)}`,
         payload: { source, requested: deletable.length },
@@ -70,7 +69,6 @@ export class AccountDeletionService {
     const failed = result.failed || [];
     await this.alerts.emit({
       type: failed.length ? 'account_delete_partial' : 'account_deleted',
-      severity: failed.length ? 'warning' : 'info',
       title: failed.length ? 'CPA 账号部分删除失败' : 'CPA 账号已删除',
       message: `请求 ${deletable.length} 个，成功 ${result.deleted} 个，失败 ${failed.length} 个，跳过 ${skipped.length} 个。`,
       payload: {

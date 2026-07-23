@@ -381,7 +381,7 @@ export class Store {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.type,
-      event.severity,
+      'event',
       event.authIndex || null,
       event.title,
       event.message,
@@ -402,7 +402,11 @@ export class Store {
     return this.db
       .prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?')
       .all(Math.min(500, Math.max(1, limit)))
-      .map((row) => ({ ...row, payload: safeJSONParse(row.payload_json, {}) }));
+      .map((row) => {
+        const event = { ...row };
+        delete event.severity;
+        return { ...event, payload: safeJSONParse(row.payload_json, {}) };
+      });
   }
 
   listAccounts() {

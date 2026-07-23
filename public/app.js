@@ -6,7 +6,7 @@ const elements = Object.fromEntries(
     'scheduleText', 'selectionText', 'addAccountButton', 'managementActions', 'deleteSelectedButton',
     'deleteAbnormalButton', 'searchInput', 'providerFilter', 'stateFilter',
     'accountsTable', 'selectColumnHeader', 'operationHeader', 'selectAllAccounts',
-    'accountsBody', 'emptyState', 'eventsList', 'notificationList', 'capabilityList',
+    'accountsBody', 'emptyState', 'eventsList', 'notificationList', 'notificationEventList', 'capabilityList',
     'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider', 'drawerTitle',
     'drawerContent', 'credentialDrawer', 'credentialBackdrop', 'credentialClose',
     'oauthTabButton', 'uploadTabButton', 'oauthPanel', 'uploadPanel', 'startOAuthButton',
@@ -243,7 +243,6 @@ function renderEvents() {
   const events = dashboard.events || [];
   elements.eventsList.innerHTML = events.length ? events.map((event) => `
     <div class="event-row">
-      <span class="state-pill ${event.severity === 'critical' ? 'auth_invalid' : event.severity === 'warning' ? 'warning' : 'healthy'}">${escapeHTML(event.severity)}</span>
       <div><strong>${escapeHTML(event.title)}</strong><p>${escapeHTML(event.message)}</p></div>
       <span class="event-time">${escapeHTML(formatTime(event.created_at))}</span>
     </div>`).join('') : '<div class="empty-state">暂无事件</div>';
@@ -254,6 +253,11 @@ function renderOperations() {
     <div class="channel-row">
       <div><strong>${escapeHTML(channel.name)}</strong><small>${channel.configured ? `${channel.enabled ? '已启用' : '已配置'} · ${channel.targets || 0} 个目标` : '未配置'}</small></div>
       ${adminAuthenticated ? `<button class="btn btn-ghost notification-test" type="button" data-channel="${escapeHTML(channel.name)}" ${channel.configured ? '' : 'disabled'}>测试</button>` : ''}
+    </div>`).join('');
+  elements.notificationEventList.innerHTML = (dashboard.notificationEvents || []).map((event) => `
+    <div class="channel-row">
+      <div><strong>${escapeHTML(event.label)}</strong><small>${escapeHTML(event.key)}</small></div>
+      <span class="state-pill ${event.enabled ? 'healthy' : 'unknown'}">${event.enabled ? '已启用' : '已关闭'}</span>
     </div>`).join('');
   const capabilityLabels = { 'active-quota': '主动额度', 'health-only': '健康状态' };
   elements.capabilityList.innerHTML = Object.entries(dashboard.providerCapabilities || {}).map(([provider, capability]) => `

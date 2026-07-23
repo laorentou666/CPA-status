@@ -181,6 +181,7 @@ test('.env reload updates live scheduling, notification and administrator settin
     'CPA_MANAGEMENT_KEY=updated-key',
     'REQUEST_TIMEOUT_SECONDS=12',
     'NOTIFY_CHANNELS=serverchan',
+    'NOTIFY_EVENTS=cpa_unreachable',
     'SERVERCHAN_SENDKEY=SCTtest',
   ].join('\n'));
   assert.equal(configManager.reload(), true);
@@ -192,6 +193,14 @@ test('.env reload updates live scheduling, notification and administrator settin
   assert.deepEqual(
     dashboard.notificationChannels.find((channel) => channel.name === 'serverchan'),
     { name: 'serverchan', enabled: true, configured: true, targets: 1 }
+  );
+  assert.equal(
+    dashboard.notificationEvents.find((event) => event.key === 'cpa_unreachable').enabled,
+    true
+  );
+  assert.equal(
+    dashboard.notificationEvents.find((event) => event.key === 'account_auth_invalid').enabled,
+    false
   );
 
   const oldSessionMutation = await fetch(`${baseURL}/api/refresh`, {

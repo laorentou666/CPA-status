@@ -94,6 +94,4 @@ test('scheduler ignores transient quota probe failures but alerts on explicit au
   account = store.getAccount('codex-1');
   assert.equal(account.effective_state, 'auth_invalid');
   assert.equal(sent.filter((event) => event.type === 'account_state_changed').length, 1);
-  await alerts.accountCountChanged(3, 4);
-  assert.equal(sent.filter((event) => event.type === 'account_count_changed').length, 0);
 });

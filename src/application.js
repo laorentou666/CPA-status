@@ -75,7 +75,7 @@ export function createApplication(config, options = {}) {
       });
     }
     if (changedKeys.some((key) => [
-      'notifyChannels', 'notifyMinSeverity', 'telegram', 'pushplus', 'serverchan',
+      'notifyChannels', 'notifyEvents', 'telegram', 'pushplus', 'serverchan',
     ].includes(key))) {
       notifications.configure(config);
     }

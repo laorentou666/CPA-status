@@ -1,12 +1,14 @@
 import { escapeHTML, truncate } from './utils.js';
-
-const severityRank = { info: 1, warning: 2, critical: 3 };
+import {
+  notificationEventDefinitions,
+  notificationEventKey,
+  normalizeNotificationEvents,
+} from './notification-events.js';
 
 function eventText(event) {
   const lines = [
     `[CPA Status] ${event.title}`,
     event.message,
-    `级别: ${event.severity}`,
     `时间: ${event.createdAt || new Date().toISOString()}`,
   ];
   return lines.filter(Boolean).join('\n');
@@ -36,7 +38,7 @@ export class TelegramNotifier {
 
   async send(event) {
     if (!this.configured()) throw new Error('Telegram is not configured');
-    const text = `<b>${escapeHTML(event.title)}</b>\n${escapeHTML(event.message)}\n\n级别: ${escapeHTML(event.severity)}`;
+    const text = `<b>${escapeHTML(event.title)}</b>\n${escapeHTML(event.message)}`;
     const deliveries = this.targets().flatMap((target) => target.chatIds.map((chatId) => ({
       botToken: target.botToken,
       chatId,
@@ -86,7 +88,6 @@ export class PushPlusNotifier {
     if (!this.configured()) throw new Error('PushPlus is not configured');
     const content = [
       `<p>${escapeHTML(event.message)}</p>`,
-      `<p><strong>级别：</strong>${escapeHTML(event.severity)}</p>`,
       `<p><strong>时间：</strong>${escapeHTML(event.createdAt || new Date().toISOString())}</p>`,
     ].join('');
     const results = await Promise.allSettled(this.targets().map(async (target) => {
@@ -157,7 +158,6 @@ export class ServerChanNotifier {
     const title = `[CPA Status] ${event.title}`.replace(/[\r\n]+/g, ' ').trim();
     const desp = [
       event.message,
-      `**级别：** ${event.severity}`,
       `**时间：** ${event.createdAt || new Date().toISOString()}`,
     ].filter(Boolean).join('\n\n');
     const results = await Promise.allSettled(this.sendKeys().map(async (sendKey) => {
@@ -195,7 +195,7 @@ export class NotificationService {
 
   configure(config) {
     this.enabled = new Set(config.notifyChannels || []);
-    this.minimumSeverity = config.notifyMinSeverity || 'warning';
+    this.events = new Set(normalizeNotificationEvents(config.notifyEvents, []));
     this.notifiers = new Map([
       ['telegram', new TelegramNotifier(config.telegram, this.fetch)],
       ['pushplus', new PushPlusNotifier(config.pushplus, this.fetch)],
@@ -212,9 +212,15 @@ export class NotificationService {
     }));
   }
 
+  eventStatus() {
+    return notificationEventDefinitions.map((event) => ({
+      ...event,
+      enabled: this.events.has(event.key),
+    }));
+  }
+
   shouldSend(event) {
-    if (event.type === 'account_recovered' || event.type === 'cpa_recovered') return true;
-    return (severityRank[event.severity] || 0) >= (severityRank[this.minimumSeverity] || 2);
+    return this.events.has(notificationEventKey(event));
   }
 
   async sendEvent(event) {
@@ -241,7 +247,6 @@ export class NotificationService {
     const event = {
       title: '通知测试成功',
       message: 'CPA Status 已成功调用该通知渠道。',
-      severity: 'info',
       createdAt: new Date().toISOString(),
     };
     const results = [];

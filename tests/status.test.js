@@ -20,7 +20,7 @@ test('recent failure ratio creates a warning', () => {
   );
 });
 
-test('quota state and base state combine by severity', () => {
+test('quota state and base state combine by state rank', () => {
   const result = {
     supported: true,
     ok: true,

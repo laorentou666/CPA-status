@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { parseEnv } from 'node:util';
+import { defaultNotificationEvents, normalizeNotificationEvents } from './notification-events.js';
 
 const restartRequiredKeys = new Set(['host', 'port', 'databasePath']);
 
@@ -101,6 +102,9 @@ function configsEqual(left, right) {
 
 export function loadConfig(overrides = {}, env = process.env) {
   const cwd = process.cwd();
+  const notifyEvents = Object.prototype.hasOwnProperty.call(env, 'NOTIFY_EVENTS')
+    ? normalizeNotificationEvents(list(env, 'NOTIFY_EVENTS'), [])
+    : [...defaultNotificationEvents];
   const config = {
     host: env.HOST || '0.0.0.0',
     port: integer(env, 'PORT', 8080, 0, 65535),
@@ -131,7 +135,7 @@ export function loadConfig(overrides = {}, env = process.env) {
     loginRateLimit: integer(env, 'LOGIN_RATE_LIMIT', 10, 1, 1000),
     loginRateLimitWindowMs: integer(env, 'LOGIN_RATE_LIMIT_WINDOW_SECONDS', 900, 10, 86_400) * 1000,
     notifyChannels: list(env, 'NOTIFY_CHANNELS').map((item) => item.toLowerCase()),
-    notifyMinSeverity: (env.NOTIFY_MIN_SEVERITY || 'warning').toLowerCase(),
+    notifyEvents,
     telegram: telegramConfig(env),
     pushplus: pushPlusConfig(env),
     serverchan: serverChanConfig(env),
