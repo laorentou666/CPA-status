@@ -3,12 +3,17 @@ const elements = Object.fromEntries(
     'loginView', 'loginForm', 'password', 'loginError', 'app', 'pageMode',
     'connectionBadge', 'lastSync', 'refreshButton', 'adminLink', 'logoutButton',
     'totalCount', 'healthyCount', 'warningCount', 'exhaustedCount', 'unavailableCount',
-    'scheduleText', 'selectionText', 'managementActions', 'deleteSelectedButton',
+    'scheduleText', 'selectionText', 'addAccountButton', 'managementActions', 'deleteSelectedButton',
     'deleteAbnormalButton', 'searchInput', 'providerFilter', 'stateFilter',
     'accountsTable', 'selectColumnHeader', 'operationHeader', 'selectAllAccounts',
     'accountsBody', 'emptyState', 'eventsList', 'notificationList', 'capabilityList',
     'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider', 'drawerTitle',
-    'drawerContent', 'toast',
+    'drawerContent', 'credentialDrawer', 'credentialBackdrop', 'credentialClose',
+    'oauthTabButton', 'uploadTabButton', 'oauthPanel', 'uploadPanel', 'startOAuthButton',
+    'oauthLinkRow', 'oauthLink', 'copyOAuthLinkButton', 'oauthCallbackForm',
+    'oauthCallbackUrl', 'submitOAuthCallbackButton', 'oauthStatus', 'uploadForm',
+    'authFileInput', 'chooseAuthFilesButton', 'uploadSelectionText', 'uploadFileList',
+    'uploadAuthFilesButton', 'uploadStatus', 'toast',
   ].map((id) => [id, document.getElementById(id)])
 );
 
@@ -26,6 +31,11 @@ let eventSource = null;
 let toastTimer = null;
 let refreshTimer = null;
 let refreshing = false;
+let oauthFlowId = '';
+let oauthPollTimer = null;
+let oauthPolling = false;
+let oauthPollErrors = 0;
+let selectedAuthFiles = [];
 
 function escapeHTML(value) {
   return String(value ?? '')
@@ -76,16 +86,24 @@ function showToast(message) {
 }
 
 async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
   const response = await fetch(path, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers,
   });
   const body = await response.json().catch(() => ({}));
   if (response.status === 401) {
     if (adminMode) showLogin();
     throw new Error(body.error || '需要管理员登录');
   }
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const retryAfter = response.headers.get('retry-after');
+    const suffix = retryAfter ? `（${retryAfter} 秒后重试）` : '';
+    throw new Error(`${body.error || `HTTP ${response.status}`}${suffix}`);
+  }
   return body;
 }
 
@@ -102,7 +120,7 @@ function showApp(session) {
   adminAuthenticated = Boolean(adminMode && session.authenticated);
   elements.loginView.hidden = true;
   elements.app.hidden = false;
-  elements.pageMode.textContent = adminAuthenticated ? '管理员页' : '游客只读页';
+  elements.pageMode.textContent = adminAuthenticated ? '管理员页' : '游客页';
   elements.refreshButton.hidden = !adminAuthenticated;
   elements.adminLink.hidden = adminMode;
   elements.logoutButton.hidden = !adminAuthenticated || !session.required;
@@ -383,6 +401,165 @@ function openDrawer(authIndex) {
 
 function closeDrawer() { elements.accountDrawer.hidden = true; }
 
+function setImportStatus(element, message, status = '') {
+  element.textContent = message;
+  element.className = `import-status${status ? ` ${status}` : ''}`;
+}
+
+function setImportTab(tab) {
+  const oauthActive = tab === 'oauth';
+  elements.oauthPanel.hidden = !oauthActive;
+  elements.uploadPanel.hidden = oauthActive;
+  elements.oauthTabButton.classList.toggle('active', oauthActive);
+  elements.uploadTabButton.classList.toggle('active', !oauthActive);
+  elements.oauthTabButton.setAttribute('aria-selected', String(oauthActive));
+  elements.uploadTabButton.setAttribute('aria-selected', String(!oauthActive));
+}
+
+function openCredentialDrawer() {
+  elements.credentialDrawer.hidden = false;
+}
+
+function closeCredentialDrawer() {
+  elements.credentialDrawer.hidden = true;
+}
+
+function stopOAuthPolling() {
+  clearTimeout(oauthPollTimer);
+  oauthPollTimer = null;
+  oauthPolling = false;
+}
+
+function scheduleOAuthPoll(delay = 0) {
+  clearTimeout(oauthPollTimer);
+  oauthPollTimer = setTimeout(pollOAuthStatus, delay);
+}
+
+async function pollOAuthStatus() {
+  if (!oauthFlowId || oauthPolling) return;
+  oauthPolling = true;
+  try {
+    const result = await api(`/api/oauth/codex/status?flowId=${encodeURIComponent(oauthFlowId)}`);
+    oauthPollErrors = 0;
+    if (result.status === 'ok') {
+      stopOAuthPolling();
+      oauthFlowId = '';
+      elements.startOAuthButton.disabled = false;
+      elements.startOAuthButton.textContent = '生成新链接';
+      elements.submitOAuthCallbackButton.disabled = true;
+      setImportStatus(elements.oauthStatus, '认证成功，账号已同步', 'success');
+      await loadDashboard();
+      showToast('Codex OAuth 认证成功');
+      return;
+    }
+    if (result.status === 'error') {
+      stopOAuthPolling();
+      oauthFlowId = '';
+      elements.startOAuthButton.disabled = false;
+      elements.startOAuthButton.textContent = '重新生成';
+      elements.submitOAuthCallbackButton.disabled = true;
+      setImportStatus(elements.oauthStatus, result.error || '认证失败', 'error');
+      return;
+    }
+    setImportStatus(
+      elements.oauthStatus,
+      result.callbackSubmitted ? '正在交换认证信息' : '等待授权或回调 URL',
+      'pending'
+    );
+    scheduleOAuthPoll(2000);
+  } catch (error) {
+    oauthPollErrors += 1;
+    if (oauthFlowId && oauthPollErrors < 5) {
+      setImportStatus(elements.oauthStatus, '状态查询暂时失败，正在重试', 'pending');
+      scheduleOAuthPoll(2000);
+    } else {
+      stopOAuthPolling();
+      oauthFlowId = '';
+      elements.startOAuthButton.disabled = false;
+      elements.startOAuthButton.textContent = '重新生成';
+      elements.submitOAuthCallbackButton.disabled = true;
+      setImportStatus(elements.oauthStatus, error.message, 'error');
+    }
+  } finally {
+    oauthPolling = false;
+  }
+}
+
+async function startCodexOAuth() {
+  elements.startOAuthButton.disabled = true;
+  elements.startOAuthButton.textContent = '生成中...';
+  elements.submitOAuthCallbackButton.disabled = true;
+  elements.oauthLinkRow.hidden = true;
+  elements.oauthCallbackUrl.value = '';
+  setImportStatus(elements.oauthStatus, '正在连接 CPA', 'pending');
+  oauthPollErrors = 0;
+  try {
+    const result = await api('/api/oauth/codex/start', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    oauthFlowId = result.flowId;
+    elements.oauthLink.href = result.url;
+    elements.oauthLinkRow.hidden = false;
+    elements.submitOAuthCallbackButton.disabled = false;
+    elements.startOAuthButton.textContent = '进行中';
+    setImportStatus(elements.oauthStatus, '等待授权或回调 URL', 'pending');
+    scheduleOAuthPoll(2000);
+  } catch (error) {
+    oauthFlowId = '';
+    elements.startOAuthButton.disabled = false;
+    elements.startOAuthButton.textContent = '重新生成';
+    setImportStatus(elements.oauthStatus, error.message, 'error');
+  }
+}
+
+function renderSelectedAuthFiles() {
+  elements.uploadFileList.replaceChildren();
+  elements.uploadSelectionText.textContent = selectedAuthFiles.length
+    ? `已选择 ${selectedAuthFiles.length} 个文件`
+    : '未选择文件';
+  elements.uploadAuthFilesButton.disabled = selectedAuthFiles.length === 0;
+  for (const file of selectedAuthFiles) {
+    const row = document.createElement('div');
+    row.className = 'upload-file-row';
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    const size = document.createElement('small');
+    size.textContent = `${Math.max(1, Math.ceil(file.size / 1024))} KB`;
+    row.append(name, size);
+    elements.uploadFileList.append(row);
+  }
+}
+
+async function uploadAuthFiles() {
+  if (!selectedAuthFiles.length) return;
+  const form = new FormData();
+  for (const file of selectedAuthFiles) form.append('file', file, file.name);
+  elements.uploadAuthFilesButton.disabled = true;
+  elements.chooseAuthFilesButton.disabled = true;
+  setImportStatus(elements.uploadStatus, '正在上传到 CPA', 'pending');
+  try {
+    const result = await api('/api/auth-files/upload', { method: 'POST', body: form });
+    const failed = Array.isArray(result.failed) ? result.failed : [];
+    const message = failed.length
+      ? `成功 ${result.uploaded || 0} 个，失败 ${failed.length} 个：${failed.map((item) => `${item.name} ${item.error}`).join('；')}`
+      : `已上传 ${result.uploaded || 0} 个认证文件`;
+    setImportStatus(elements.uploadStatus, message, failed.length ? 'error' : 'success');
+    if (result.uploaded) {
+      await loadDashboard();
+      showToast(`认证文件上传完成：${result.uploaded} 个`);
+    }
+    selectedAuthFiles = [];
+    elements.authFileInput.value = '';
+    renderSelectedAuthFiles();
+  } catch (error) {
+    setImportStatus(elements.uploadStatus, error.message, 'error');
+  } finally {
+    elements.chooseAuthFilesButton.disabled = false;
+    elements.uploadAuthFilesButton.disabled = selectedAuthFiles.length === 0;
+  }
+}
+
 elements.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   elements.loginError.textContent = '';
@@ -450,10 +627,55 @@ elements.deleteSelectedButton.addEventListener('click', () => {
   deleteAccounts([...selectedAccounts], `所选 ${selectedAccounts.size} 个账号`);
 });
 elements.deleteAbnormalButton.addEventListener('click', deleteAbnormalAccounts);
+elements.addAccountButton.addEventListener('click', openCredentialDrawer);
 elements.drawerBackdrop.addEventListener('click', closeDrawer);
 elements.drawerClose.addEventListener('click', closeDrawer);
+elements.credentialBackdrop.addEventListener('click', closeCredentialDrawer);
+elements.credentialClose.addEventListener('click', closeCredentialDrawer);
+elements.oauthTabButton.addEventListener('click', () => setImportTab('oauth'));
+elements.uploadTabButton.addEventListener('click', () => setImportTab('upload'));
+elements.startOAuthButton.addEventListener('click', startCodexOAuth);
+elements.copyOAuthLinkButton.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(elements.oauthLink.href);
+    showToast('授权链接已复制');
+  } catch {
+    showToast('复制失败，请打开链接后从地址栏复制');
+  }
+});
+elements.oauthCallbackForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!oauthFlowId) return;
+  elements.submitOAuthCallbackButton.disabled = true;
+  setImportStatus(elements.oauthStatus, '正在提交回调 URL', 'pending');
+  try {
+    await api('/api/oauth/codex/callback', {
+      method: 'POST',
+      body: JSON.stringify({
+        flowId: oauthFlowId,
+        redirectUrl: elements.oauthCallbackUrl.value.trim(),
+      }),
+    });
+    setImportStatus(elements.oauthStatus, '正在交换认证信息', 'pending');
+    scheduleOAuthPoll(500);
+  } catch (error) {
+    elements.submitOAuthCallbackButton.disabled = false;
+    setImportStatus(elements.oauthStatus, error.message, 'error');
+  }
+});
+elements.chooseAuthFilesButton.addEventListener('click', () => elements.authFileInput.click());
+elements.authFileInput.addEventListener('change', () => {
+  selectedAuthFiles = [...elements.authFileInput.files];
+  setImportStatus(elements.uploadStatus, '');
+  renderSelectedAuthFiles();
+});
+elements.uploadForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  uploadAuthFiles();
+});
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !elements.accountDrawer.hidden) closeDrawer();
+  else if (event.key === 'Escape' && !elements.credentialDrawer.hidden) closeCredentialDrawer();
 });
 elements.notificationList.addEventListener('click', async (event) => {
   const button = event.target.closest('.notification-test');

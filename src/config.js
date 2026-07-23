@@ -17,6 +17,14 @@ function number(env, name, fallback, min = 0, max = Number.MAX_SAFE_INTEGER) {
   return Math.min(max, Math.max(min, value));
 }
 
+function boolean(env, name, fallback = false) {
+  const value = String(env[name] ?? '').trim().toLowerCase();
+  if (!value) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(value)) return true;
+  if (['0', 'false', 'no', 'off'].includes(value)) return false;
+  return fallback;
+}
+
 function list(env, name) {
   return String(env[name] ?? '')
     .split(',')
@@ -107,6 +115,21 @@ export function loadConfig(overrides = {}, env = process.env) {
     historyRetentionDays: integer(env, 'HISTORY_RETENTION_DAYS', 30, 1, 3650),
     adminPassword: env.APP_ADMIN_PASSWORD || '',
     sessionTtlMs: integer(env, 'SESSION_TTL_HOURS', 24, 1, 720) * 60 * 60 * 1000,
+    trustProxy: boolean(env, 'APP_TRUST_PROXY', false),
+    oauthStartRateLimit: integer(env, 'OAUTH_START_RATE_LIMIT', 3, 1, 1000),
+    oauthCallbackRateLimit: integer(env, 'OAUTH_CALLBACK_RATE_LIMIT', 6, 1, 1000),
+    oauthStatusRateLimit: integer(env, 'OAUTH_STATUS_RATE_LIMIT', 180, 10, 100_000),
+    oauthRateLimitWindowMs: integer(env, 'OAUTH_RATE_LIMIT_WINDOW_SECONDS', 600, 10, 86_400) * 1000,
+    oauthMaxActiveFlows: integer(env, 'OAUTH_MAX_ACTIVE_FLOWS', 8, 1, 100),
+    oauthMaxActiveFlowsPerClient: integer(env, 'OAUTH_MAX_ACTIVE_FLOWS_PER_CLIENT', 2, 1, 10),
+    oauthStatusMinIntervalMs: integer(env, 'OAUTH_STATUS_MIN_INTERVAL_SECONDS', 2, 1, 30) * 1000,
+    uploadRateLimit: integer(env, 'UPLOAD_RATE_LIMIT', 5, 1, 1000),
+    uploadRateLimitWindowMs: integer(env, 'UPLOAD_RATE_LIMIT_WINDOW_SECONDS', 600, 10, 86_400) * 1000,
+    uploadMaxFileBytes: integer(env, 'UPLOAD_MAX_FILE_BYTES', 1024 * 1024, 1024, 64 * 1024 * 1024),
+    uploadMaxRequestBytes: integer(env, 'UPLOAD_MAX_REQUEST_BYTES', 5 * 1024 * 1024, 1024, 128 * 1024 * 1024),
+    uploadMaxFiles: integer(env, 'UPLOAD_MAX_FILES', 5, 1, 100),
+    loginRateLimit: integer(env, 'LOGIN_RATE_LIMIT', 10, 1, 1000),
+    loginRateLimitWindowMs: integer(env, 'LOGIN_RATE_LIMIT_WINDOW_SECONDS', 900, 10, 86_400) * 1000,
     notifyChannels: list(env, 'NOTIFY_CHANNELS').map((item) => item.toLowerCase()),
     notifyMinSeverity: (env.NOTIFY_MIN_SEVERITY || 'warning').toLowerCase(),
     telegram: telegramConfig(env),

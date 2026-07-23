@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>CPA Status</title>
-    <link rel="stylesheet" href="/styles.css?v=0.4.0">
+    <link rel="stylesheet" href="/styles.css?v=0.5.0">
   </head>
   <body>
     <div id="loginView" class="login-shell" hidden>
@@ -57,9 +57,12 @@
               <p id="scheduleText" class="section-sub"></p>
               <p id="selectionText" class="section-sub" hidden></p>
             </div>
-            <div id="managementActions" class="mgmt-actions" hidden>
-              <button id="deleteSelectedButton" class="btn btn-danger" type="button" disabled>删除所选</button>
-              <button id="deleteAbnormalButton" class="btn btn-danger-outline" type="button">删除异常账号</button>
+            <div class="section-actions">
+              <button id="addAccountButton" class="btn btn-primary" type="button">添加账号</button>
+              <div id="managementActions" class="mgmt-actions" hidden>
+                <button id="deleteSelectedButton" class="btn btn-danger" type="button" disabled>删除所选</button>
+                <button id="deleteAbnormalButton" class="btn btn-danger-outline" type="button">删除异常账号</button>
+              </div>
             </div>
           </div>
 
@@ -123,8 +126,53 @@
           <div id="drawerContent" class="drawer-content"></div>
         </aside>
       </div>
+
+      <div id="credentialDrawer" class="drawer" hidden>
+        <button id="credentialBackdrop" class="drawer-backdrop" type="button" aria-label="关闭"></button>
+        <aside class="drawer-panel credential-panel" aria-labelledby="credentialTitle">
+          <div class="drawer-header">
+            <div><span class="provider-tag">CPA</span><h2 id="credentialTitle">添加账号</h2></div>
+            <button id="credentialClose" class="btn btn-icon" type="button" title="关闭" aria-label="关闭">×</button>
+          </div>
+          <div class="drawer-content">
+            <div class="segmented" role="tablist" aria-label="添加方式">
+              <button id="oauthTabButton" class="segmented-button active" type="button" role="tab" aria-selected="true">Codex OAuth</button>
+              <button id="uploadTabButton" class="segmented-button" type="button" role="tab" aria-selected="false">上传 JSON</button>
+            </div>
+
+            <section id="oauthPanel" class="import-panel">
+              <div class="import-step">
+                <div class="import-step-head"><span>授权链接</span><button id="startOAuthButton" class="btn btn-primary" type="button">生成链接</button></div>
+                <div id="oauthLinkRow" class="oauth-link-row" hidden>
+                  <a id="oauthLink" class="oauth-link" href="#" target="_blank" rel="noopener noreferrer">打开授权页</a>
+                  <button id="copyOAuthLinkButton" class="btn btn-ghost" type="button">复制链接</button>
+                </div>
+              </div>
+              <form id="oauthCallbackForm" class="import-step">
+                <label for="oauthCallbackUrl">回调 URL</label>
+                <textarea id="oauthCallbackUrl" class="input textarea" maxlength="4096" placeholder="http://localhost:1455/auth/callback?code=...&amp;state=..." required></textarea>
+                <button id="submitOAuthCallbackButton" class="btn btn-primary" type="submit" disabled>提交回调</button>
+              </form>
+              <p id="oauthStatus" class="import-status" role="status">尚未开始</p>
+            </section>
+
+            <section id="uploadPanel" class="import-panel" hidden>
+              <form id="uploadForm">
+                <input id="authFileInput" type="file" accept=".json,application/json" multiple hidden>
+                <div class="upload-picker">
+                  <button id="chooseAuthFilesButton" class="btn" type="button">选择 JSON 文件</button>
+                  <span id="uploadSelectionText">未选择文件</span>
+                </div>
+                <div id="uploadFileList" class="upload-file-list"></div>
+                <button id="uploadAuthFilesButton" class="btn btn-primary btn-block" type="submit" disabled>上传到 CPA</button>
+              </form>
+              <p id="uploadStatus" class="import-status" role="status"></p>
+            </section>
+          </div>
+        </aside>
+      </div>
       <div id="toast" class="toast" role="status" hidden></div>
     </div>
-    <script src="/app.js?v=0.4.0" defer></script>
+    <script src="/app.js?v=0.5.0" defer></script>
   </body>
 </html>

@@ -6,7 +6,7 @@
 
 - CLI Proxy API Management Center `v1.18.5`
 - CLIProxyAPI `v7.2.29`
-- Management API：`GET /v0/management/auth-files`、`POST /v0/management/api-call`
+- Management API：账号读取/上传/删除、Codex OAuth、OAuth 状态查询、`POST /v0/management/api-call`
 
 ## 功能
 
@@ -18,15 +18,17 @@
 - SQLite 历史记录和 SSE 页面更新。
 - `.env` 自动加载及热更新，大部分参数修改后不需要重启容器。
 - 游客页与管理员页分离，监控和账号管理合并在同一张账号表中。
+- 游客和管理员都可以通过 Codex OAuth 或 JSON 文件添加账号，游客不能删除账号或覆盖同名认证文件。
+- OAuth、上传和登录接口内置按客户端/IP 的频率限制、请求体限制与并发保护。
 
 ## 页面权限
 
 | 地址 | 权限 | 功能 |
 | --- | --- | --- |
-| `http://127.0.0.1:8080/` | 游客 | 查看摘要、账号状态、额度、事件和通知渠道状态 |
-| `http://127.0.0.1:8080/admin` | 管理员 | 游客页全部内容，以及立即同步、通知测试、单个/批量删除账号 |
+| `http://127.0.0.1:8080/` | 游客 | 查看监控数据，通过 Codex OAuth 或 JSON 文件新增账号；不能删除账号或覆盖同名认证文件 |
+| `http://127.0.0.1:8080/admin` | 管理员 | 游客页全部内容，以及立即同步、通知测试、上传覆盖、单个/批量删除账号 |
 
-游客可以读取监控数据，但所有修改类 API 都要求管理员会话。公网部署必须设置：
+游客只放行受限的 OAuth 和认证文件新增 API，其他修改类 API 都要求管理员会话。公网部署必须设置：
 
 ```env
 APP_ADMIN_PASSWORD=replace-with-a-strong-password
@@ -70,6 +72,7 @@ CONFIG_FILE=/etc/cpa-status.env npm start
 - `QUOTA_CONCURRENCY`、`QUOTA_WARNING_PERCENT`
 - `REQUEST_TIMEOUT_SECONDS`、`HISTORY_RETENTION_DAYS`
 - `APP_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`
+- OAuth、上传、登录限流与上传大小限制
 - 全部通知渠道和通知凭证
 
 具体行为：
@@ -206,6 +209,37 @@ SERVERCHAN_SENDKEY_2=sctp123tyyyyyyyy
 
 修改并保存 `.env` 后无需重启。进入 `/admin`，可在“通知渠道”区域分别发送测试消息。
 
+## Codex OAuth 与认证文件上传
+
+游客页和管理员页的“添加账号”入口支持两种方式：
+
+- Codex OAuth：由 CPA 生成授权链接。远程浏览器授权完成后，把浏览器地址栏中的完整回调 URL 粘贴回来；CPA 负责校验 state、交换 Token 并保存认证文件。
+- JSON 上传：只接受扩展名为 `.json`、顶层为 JSON 对象的认证文件。文件内容只在内存中校验并转发给 CPA，不写入本项目的 SQLite，也不会返回到前端。
+
+游客上传前会重新读取 CPA 认证文件列表并阻止同名覆盖。管理员会话允许上传替换已有文件。OAuth 完成或文件上传成功后，监控服务会立即重新同步账号列表。
+
+默认保护参数如下，均支持 `.env` 热更新：
+
+| 变量 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `APP_TRUST_PROXY` | `false` | 仅在可信反向代理覆盖客户端来源地址时设为 `true` |
+| `OAUTH_START_RATE_LIMIT` | `3` | 每个限流窗口允许发起的 OAuth 次数 |
+| `OAUTH_CALLBACK_RATE_LIMIT` | `6` | 每个限流窗口允许提交的回调次数 |
+| `OAUTH_STATUS_RATE_LIMIT` | `180` | 每个限流窗口允许查询的 OAuth 状态次数 |
+| `OAUTH_RATE_LIMIT_WINDOW_SECONDS` | `600` | OAuth 限流窗口秒数 |
+| `OAUTH_MAX_ACTIVE_FLOWS` | `8` | 当前进程允许同时存在的 OAuth 流程总数 |
+| `OAUTH_MAX_ACTIVE_FLOWS_PER_CLIENT` | `2` | 单个客户端允许同时存在的 OAuth 流程数 |
+| `OAUTH_STATUS_MIN_INTERVAL_SECONDS` | `2` | 同一流程向 CPA 查询状态的最短间隔 |
+| `UPLOAD_RATE_LIMIT` | `5` | 每个上传限流窗口允许的请求数 |
+| `UPLOAD_RATE_LIMIT_WINDOW_SECONDS` | `600` | 上传限流窗口秒数 |
+| `UPLOAD_MAX_FILE_BYTES` | `1048576` | 单个 JSON 文件最大字节数 |
+| `UPLOAD_MAX_REQUEST_BYTES` | `5242880` | 单次 multipart 请求最大字节数 |
+| `UPLOAD_MAX_FILES` | `5` | 单次最大文件数 |
+| `LOGIN_RATE_LIMIT` | `10` | 每个登录限流窗口允许的尝试次数 |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `900` | 登录限流窗口秒数 |
+
+频率超限返回 HTTP `429` 和 `Retry-After`。限流状态保存在当前进程内，适用于本项目默认的单实例部署。
+
 ## 账号删除
 
 账号删除调用 CLIProxyAPI `v7.2.29` 提供的 `DELETE /v0/management/auth-files`，批量请求体使用 `{ "names": [...] }`。CPA 删除成功后，监控服务会立即重新读取 `/auth-files`，不会只删除本地 SQLite 数据。
@@ -232,12 +266,14 @@ npm test
 npm run smoke
 ```
 
-测试覆盖配置文件监听、热更新应用、游客/管理员权限、账号删除、Provider 解析和三种通知渠道。Smoke test 会启动模拟 CLIProxyAPI 与真实 CPA Status HTTP 服务，验证后台调度、SQLite、页面、删除和手动同步接口。
+测试覆盖配置文件监听、热更新应用、游客/管理员权限、Codex OAuth、认证文件上传、覆盖保护、请求限流、账号删除、Provider 解析和三种通知渠道。Smoke test 会启动模拟 CLIProxyAPI 与真实 CPA Status HTTP 服务，验证后台调度、SQLite、页面、删除和手动同步接口。
 
 ## 安全边界
 
 - 前端和 API 不返回 Management Key、OAuth Token、SendKey 或认证文件内容。
-- 游客只允许读取监控信息，修改类 API 统一要求管理员会话。
+- 游客只能调用绑定匿名客户端会话并经过限流的 OAuth/上传新增接口；删除、同步、通知测试等修改操作仍要求管理员会话。
+- 前端只使用随机 flow ID 关联流程，不单独提交 CPA state；state 仅随 CPA 生成的授权链接出现，回调 URL 不写入日志或数据库。
+- JSON 上传限制文件名、数量、单文件大小、总请求大小和 JSON 结构，游客不能覆盖同名认证文件。
 - Provider 查询只能访问代码中的 HTTPS 域名白名单，不暴露通用 `/api-call` 转发接口。
 - 对没有可靠只读额度接口的 Provider，只使用 CPA 状态和请求数据，不发送模型推理请求。
 - 公网部署应设置 `APP_ADMIN_PASSWORD`，并由反向代理提供 HTTPS。

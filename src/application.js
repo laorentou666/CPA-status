@@ -7,6 +7,7 @@ import { SSEHub } from './sse.js';
 import { MonitorScheduler } from './scheduler.js';
 import { createHTTPServer } from './server.js';
 import { AccountDeletionService } from './account-deletion.js';
+import { CredentialImportService } from './credential-import.js';
 
 export function createApplication(config, options = {}) {
   const logger = options.logger || console;
@@ -41,6 +42,12 @@ export function createApplication(config, options = {}) {
     scheduler,
     alerts,
   });
+  const credentialImport = options.credentialImport || new CredentialImportService({
+    config,
+    cpaClient,
+    scheduler,
+    logger,
+  });
   const http = createHTTPServer({
     config,
     store,
@@ -49,6 +56,7 @@ export function createApplication(config, options = {}) {
     providers,
     hub,
     accountDeletion,
+    credentialImport,
     logger,
   });
   const server = http.server;
@@ -98,6 +106,7 @@ export function createApplication(config, options = {}) {
     hub,
     scheduler,
     accountDeletion,
+    credentialImport,
     server,
     async start() {
       await new Promise((resolve, reject) => {
@@ -115,6 +124,7 @@ export function createApplication(config, options = {}) {
       configManager?.stopWatching();
       configManager?.off('change', onConfigChange);
       scheduler.stop();
+      credentialImport.stop?.();
       hub.close();
       if (server.listening) await new Promise((resolve) => server.close(resolve));
       store.close();

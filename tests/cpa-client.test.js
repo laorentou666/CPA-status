@@ -20,6 +20,24 @@ test('CPA client reads v7.2.29 auth file shape and proxies an allowlisted call',
   assert.equal(deleted.deleted, 1);
   assert.deepEqual(deleted.files, ['gemini-user.json']);
   assert.equal((await client.listAuthFiles()).length, 1);
+
+  const uploaded = await client.uploadAuthFile(
+    'manual-codex.json',
+    Buffer.from(JSON.stringify({ type: 'codex', email: 'manual@example.com' }))
+  );
+  assert.equal(uploaded.uploaded, 1);
+  assert.equal(mock.uploads()[0].authorization, 'Bearer secret');
+
+  const oauth = await client.startCodexOAuth();
+  assert.match(oauth.url, /^https:\/\/auth\.example\.test/);
+  assert.match(oauth.state, /^codex-state-/);
+  assert.equal((await client.getOAuthStatus(oauth.state)).status, 'wait');
+  await client.submitOAuthCallback({
+    provider: 'codex',
+    state: oauth.state,
+    redirectURL: `http://localhost:1455/auth/callback?code=test-code&state=${oauth.state}`,
+  });
+  assert.equal((await client.getOAuthStatus(oauth.state)).status, 'ok');
 });
 
 test('CPA client rejects arbitrary api-call targets', async () => {

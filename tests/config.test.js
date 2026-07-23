@@ -31,6 +31,26 @@ test('loadConfig groups numbered notification credentials by channel', () => {
   assert.deepEqual(config.serverchan.sendKeys, ['SCTone', 'sctp123ttwo']);
 });
 
+test('loadConfig reads public write protection limits', () => {
+  const config = loadConfig({}, {
+    APP_TRUST_PROXY: 'true',
+    OAUTH_START_RATE_LIMIT: '4',
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS: '120',
+    OAUTH_MAX_ACTIVE_FLOWS: '6',
+    UPLOAD_RATE_LIMIT: '7',
+    UPLOAD_MAX_FILE_BYTES: '2048',
+    UPLOAD_MAX_FILES: '3',
+  });
+
+  assert.equal(config.trustProxy, true);
+  assert.equal(config.oauthStartRateLimit, 4);
+  assert.equal(config.oauthRateLimitWindowMs, 120_000);
+  assert.equal(config.oauthMaxActiveFlows, 6);
+  assert.equal(config.uploadRateLimit, 7);
+  assert.equal(config.uploadMaxFileBytes, 2048);
+  assert.equal(config.uploadMaxFiles, 3);
+});
+
 test('ConfigManager watches .env changes and preserves startup-only settings', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-status-config-'));
   const filePath = path.join(directory, '.env');

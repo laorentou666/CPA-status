@@ -78,6 +78,55 @@ export class CPAClient {
     return payload.files;
   }
 
+  async uploadAuthFile(name, data) {
+    const filename = String(name || '').trim();
+    if (!filename || filename.includes('/') || filename.includes('\\') || !filename.toLowerCase().endsWith('.json')) {
+      throw new CPAError(`Unsafe auth file name: ${filename}`);
+    }
+    const form = new FormData();
+    form.append('file', new Blob([data], { type: 'application/json' }), filename);
+    const payload = await this.request('/auth-files', {
+      method: 'POST',
+      body: form,
+    });
+    return {
+      status: payload?.status || 'ok',
+      uploaded: Number.isFinite(Number(payload?.uploaded)) ? Number(payload.uploaded) : 1,
+      files: Array.isArray(payload?.files) ? payload.files : [filename],
+      failed: Array.isArray(payload?.failed) ? payload.failed : [],
+    };
+  }
+
+  async startCodexOAuth() {
+    const payload = await this.request('/codex-auth-url?is_webui=true');
+    const url = String(payload?.url || '').trim();
+    const state = String(payload?.state || '').trim();
+    if (!url || !state) throw new CPAError('CPA codex-auth-url returned an invalid payload');
+    return { url, state };
+  }
+
+  async submitOAuthCallback({ provider, redirectURL, state }) {
+    const payload = await this.request('/oauth-callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider,
+        redirect_url: redirectURL,
+        state,
+      }),
+    });
+    if (payload?.status !== 'ok') throw new CPAError('CPA oauth-callback returned an invalid payload');
+    return payload;
+  }
+
+  async getOAuthStatus(state) {
+    const payload = await this.request(`/get-auth-status?state=${encodeURIComponent(String(state || ''))}`);
+    if (!payload || !['ok', 'wait', 'error'].includes(payload.status)) {
+      throw new CPAError('CPA get-auth-status returned an invalid payload');
+    }
+    return { status: payload.status, error: payload.error || '' };
+  }
+
   async deleteAuthFiles(names) {
     const uniqueNames = [...new Set((names || []).map((name) => String(name).trim()).filter(Boolean))];
     if (!uniqueNames.length) throw new CPAError('No auth file names were provided');

@@ -7,6 +7,13 @@ import { ConfigManager, loadConfig } from '../src/config.js';
 import { createApplication } from '../src/application.js';
 import { fixtureFiles, mockApiCall, startMockCPA, waitFor } from './helpers.js';
 
+async function guestClientCookie(baseURL) {
+  const response = await fetch(`${baseURL}/api/session`);
+  const cookie = response.headers.get('set-cookie');
+  assert.match(cookie, /cpa_status_client=/);
+  return cookie.split(';')[0];
+}
+
 test('guest APIs stay readable while administrator mutations require an HttpOnly session', async (t) => {
   const mock = await startMockCPA({ files: fixtureFiles(), apiCall: mockApiCall });
   t.after(mock.close);
@@ -200,4 +207,129 @@ test('.env reload updates live scheduling, notification and administrator settin
     body: JSON.stringify({ password: 'new-password' }),
   });
   assert.equal(newLogin.status, 200);
+});
+
+test('guest can add Codex OAuth and JSON credentials but cannot delete accounts', async (t) => {
+  const mock = await startMockCPA({ files: fixtureFiles(), apiCall: mockApiCall });
+  t.after(mock.close);
+  const app = createApplication(loadConfig({
+    host: '127.0.0.1',
+    port: 0,
+    databasePath: ':memory:',
+    cpaManagementURL: mock.managementURL,
+    adminPassword: 'admin-only',
+    notifyChannels: [],
+    accountSyncIntervalMs: 60_000,
+    quotaSyncIntervalMs: 60_000,
+    oauthStatusMinIntervalMs: 0,
+  }), { logger: { log() {}, error() {} } });
+  t.after(() => app.stop());
+  const address = await app.start();
+  const baseURL = `http://127.0.0.1:${address.port}`;
+  const cookie = await guestClientCookie(baseURL);
+
+  const startedResponse = await fetch(`${baseURL}/api/oauth/codex/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: '{}',
+  });
+  assert.equal(startedResponse.status, 201);
+  const started = await startedResponse.json();
+  assert.ok(started.flowId);
+  assert.equal(started.state, undefined);
+  const state = new URL(started.url).searchParams.get('state');
+
+  const callbackResponse = await fetch(`${baseURL}/api/oauth/codex/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({
+      flowId: started.flowId,
+      redirectUrl: `http://localhost:1455/auth/callback?code=test-code&state=${state}`,
+    }),
+  });
+  assert.equal(callbackResponse.status, 202);
+  const oauthStatus = await fetch(
+    `${baseURL}/api/oauth/codex/status?flowId=${encodeURIComponent(started.flowId)}`,
+    { headers: { Cookie: cookie } }
+  );
+  assert.equal(oauthStatus.status, 200);
+  assert.equal((await oauthStatus.json()).status, 'ok');
+
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([JSON.stringify({ type: 'codex', email: 'uploaded@example.com' })], { type: 'application/json' }),
+    'uploaded-codex.json'
+  );
+  const uploadResponse = await fetch(`${baseURL}/api/auth-files/upload`, {
+    method: 'POST',
+    headers: { Cookie: cookie },
+    body: form,
+  });
+  assert.equal(uploadResponse.status, 200);
+  assert.equal((await uploadResponse.json()).uploaded, 1);
+
+  await waitFor(async () => {
+    const dashboard = await fetch(`${baseURL}/api/dashboard`).then((response) => response.json());
+    return dashboard.counts.total === 4;
+  });
+
+  const replacement = new FormData();
+  replacement.append(
+    'file',
+    new Blob([JSON.stringify({ type: 'codex', email: 'replacement@example.com' })], { type: 'application/json' }),
+    'codex-user.json'
+  );
+  const replacementResponse = await fetch(`${baseURL}/api/auth-files/upload`, {
+    method: 'POST',
+    headers: { Cookie: cookie },
+    body: replacement,
+  });
+  const replacementResult = await replacementResponse.json();
+  assert.equal(replacementResult.uploaded, 0);
+  assert.match(replacementResult.failed[0].error, /不能覆盖/);
+
+  const deniedDelete = await fetch(`${baseURL}/api/accounts`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ authIndexes: ['codex-1'] }),
+  });
+  assert.equal(deniedDelete.status, 401);
+});
+
+test('public OAuth start endpoint returns 429 when its rate limit is exceeded', async (t) => {
+  const mock = await startMockCPA({ files: fixtureFiles() });
+  t.after(mock.close);
+  const app = createApplication(loadConfig({
+    host: '127.0.0.1',
+    port: 0,
+    databasePath: ':memory:',
+    cpaManagementURL: mock.managementURL,
+    adminPassword: 'admin-only',
+    notifyChannels: [],
+    accountSyncIntervalMs: 60_000,
+    quotaSyncIntervalMs: 60_000,
+    oauthStartRateLimit: 1,
+    oauthMaxActiveFlowsPerClient: 5,
+  }), { logger: { log() {}, error() {} } });
+  t.after(() => app.stop());
+  const address = await app.start();
+  const baseURL = `http://127.0.0.1:${address.port}`;
+  const cookie = await guestClientCookie(baseURL);
+
+  const first = await fetch(`${baseURL}/api/oauth/codex/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: '{}',
+  });
+  assert.equal(first.status, 201);
+
+  const second = await fetch(`${baseURL}/api/oauth/codex/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: '{}',
+  });
+  assert.equal(second.status, 429);
+  assert.ok(Number(second.headers.get('retry-after')) >= 1);
+  assert.equal(mock.oauthStarts(), 1);
 });
