@@ -39,7 +39,7 @@ function normalizeAuthFile(raw, registry, previous, seenAt) {
       quotaCapability: registry.capability(provider),
     },
   };
-  account.baseState = evaluateBaseState(account);
+  account.baseState = evaluateBaseState(account, previous?.base_state || previous?.baseState || null);
   account.effectiveState = combineStates(account.baseState, account.quotaState);
   return account;
 }
@@ -163,7 +163,7 @@ export class MonitorScheduler {
       }
 
       const previousCount = this.store.getState('last_account_count', null);
-      if (previousCount === null || files.length >= previousCount || unexpectedMissing > 0) {
+      if (previousCount !== null && unexpectedMissing > 0) {
         await this.alerts.accountCountChanged(previousCount, files.length);
       }
       this.store.setState('last_account_count', files.length);
@@ -206,6 +206,12 @@ export class MonitorScheduler {
           },
           this.cpaClient
         );
+        if (!result?.supported) {
+          this.store.updateQuotaObservation(account.auth_index, result, checkedAt);
+          completed += 1;
+          this.hub.broadcast('quota:progress', { completed, total: accounts.length });
+          return result;
+        }
         const quotaState = evaluateQuotaState(result, warningPercent);
         const effectiveState = combineStates(account.base_state, quotaState);
         const previous = this.store.updateQuota(
@@ -227,20 +233,27 @@ export class MonitorScheduler {
         if (result.status !== 'rejected') continue;
         const account = accounts[index];
         const error = result.reason;
-        const previousFailures = Number(account.consecutive_probe_failures || 0);
-        let quotaState = 'unknown';
-        if (error instanceof ProbeError) quotaState = error.classification;
-        if (quotaState === 'unknown' && previousFailures + 1 >= 3) quotaState = 'warning';
+        const errorMessage = truncate(error?.message || String(error), 500);
+        const quotaState = error instanceof ProbeError ? error.classification : 'transient';
+        const alertable = ['auth_invalid', 'disabled', 'quota_exhausted', 'rate_limited'].includes(quotaState);
+        if (!alertable) {
+          this.store.updateQuotaTransientError(
+            account.auth_index,
+            errorMessage,
+            checkedAt
+          );
+          continue;
+        }
         const effectiveState = combineStates(account.base_state, quotaState);
         const previous = this.store.updateQuotaError(
           account.auth_index,
-          truncate(error.message, 500),
+          errorMessage,
           quotaState,
           effectiveState,
           checkedAt
         );
         const current = this.store.getAccount(account.auth_index);
-        await this.alerts.accountTransition(previous, current, truncate(error.message, 240));
+        await this.alerts.accountTransition(previous, current, truncate(errorMessage, 240));
       }
 
       const failed = results.filter((result) => result.status === 'rejected').length;

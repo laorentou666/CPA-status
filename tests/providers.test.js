@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProviderRegistry } from '../src/providers.js';
+import { ProbeError, ProviderRegistry } from '../src/providers.js';
 
 test('Codex provider parses primary, weekly and credit balance data', async () => {
   const registry = new ProviderRegistry();
@@ -104,4 +104,27 @@ test('unknown providers remain health-only instead of fabricating a balance', as
   assert.equal(result.supported, false);
   assert.equal(result.windows.length, 0);
   assert.match(result.summary.reason, /没有经文档确认/);
+});
+
+test('provider failures use explicit account evidence instead of treating every 403 as auth failure', async () => {
+  const registry = new ProviderRegistry();
+  const probe = async (response) => {
+    const client = {
+      async apiCall() {
+        return { statusCode: response.statusCode, headers: {}, body: response.body || '' };
+      },
+    };
+    await assert.rejects(
+      () => registry.probe({ authIndex: 'codex-1', provider: 'codex', metadata: {} }, client),
+      (error) => error instanceof ProbeError && error.classification === response.classification
+    );
+  };
+
+  await probe({ statusCode: 401, classification: 'auth_invalid', body: '{"error":{"code":"account_deactivated"}}' });
+  await probe({ statusCode: 403, classification: 'auth_invalid', body: '{"error":"unauthorized"}' });
+  await probe({ statusCode: 403, classification: 'disabled', body: 'This service has been disabled in this account for violation of Terms of Service.' });
+  await probe({ statusCode: 403, classification: 'unknown', body: '{"error":{"code":"payment_required"}}' });
+  await probe({ statusCode: 403, classification: 'unknown', body: '{"error":{"type":"invalid_request_error","message":"request rejected"}}' });
+  await probe({ statusCode: 429, classification: 'rate_limited', body: '{"error":{"type":"rate_limit"}}' });
+  await probe({ statusCode: 502, classification: 'transient', body: '{"error":"context canceled"}' });
 });

@@ -29,5 +29,23 @@ test('quota state and base state combine by severity', () => {
   assert.equal(evaluateQuotaState(result, 80), 'quota_exhausted');
   assert.equal(combineStates('healthy', 'quota_exhausted'), 'quota_exhausted');
   assert.equal(combineStates('auth_invalid', 'healthy'), 'auth_invalid');
+  assert.equal(combineStates('healthy', 'unknown'), 'healthy');
+  assert.equal(combineStates('unknown', 'healthy'), 'healthy');
 });
 
+test('transient CPA status messages keep the previous base state', () => {
+  assert.equal(
+    evaluateBaseState(
+      { cpaStatus: 'error', statusMessage: 'context canceled', unavailable: true },
+      'healthy'
+    ),
+    'healthy'
+  );
+  assert.equal(
+    evaluateBaseState(
+      { cpaStatus: 'error', statusMessage: 'context canceled', unavailable: true, disabled: true },
+      'healthy'
+    ),
+    'disabled'
+  );
+});

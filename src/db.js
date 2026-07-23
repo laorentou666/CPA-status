@@ -334,6 +334,30 @@ export class Store {
     return previous;
   }
 
+  updateQuotaObservation(authIndex, result, checkedAt) {
+    this.db.prepare(`
+      UPDATE accounts SET quota_summary_json = ?, quota_checked_at = ?, quota_error = NULL,
+        consecutive_probe_failures = 0, plan_type = COALESCE(?, plan_type), updated_at = ?
+      WHERE auth_index = ?
+    `).run(
+      JSON.stringify(result?.summary || {}),
+      checkedAt,
+      result?.planType || null,
+      checkedAt,
+      authIndex
+    );
+  }
+
+  updateQuotaTransientError(authIndex, error, checkedAt) {
+    const previous = this.getAccount(authIndex);
+    this.db.prepare(`
+      UPDATE accounts SET quota_checked_at = ?, quota_error = ?,
+        consecutive_probe_failures = consecutive_probe_failures + 1, updated_at = ?
+      WHERE auth_index = ?
+    `).run(checkedAt, error, checkedAt, authIndex);
+    return previous;
+  }
+
   updateQuotaError(authIndex, error, quotaState, effectiveState, checkedAt) {
     const previous = this.getAccount(authIndex);
     this.db.prepare(`

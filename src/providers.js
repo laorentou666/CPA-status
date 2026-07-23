@@ -43,6 +43,21 @@ export class ProbeError extends Error {
   }
 }
 
+const structuredErrorKeys = new Set([
+  'code',
+  'type',
+  'error_code',
+  'errorcode',
+  'status',
+  'reason',
+  'kind',
+  'category',
+  'subscription',
+  'error',
+  'message',
+  'detail',
+]);
+
 function providerName(value) {
   const normalized = String(value || 'unknown').trim().toLowerCase();
   if (normalized === 'anthropic') return 'claude';
@@ -52,6 +67,31 @@ function providerName(value) {
 
 function parseBody(body) {
   return safeJSONParse(body, null);
+}
+
+function structuredErrorText(body) {
+  const payload = parseBody(body);
+  if (!payload || typeof payload !== 'object') return '';
+  const values = [];
+  const visit = (value, depth = 0) => {
+    if (depth > 5 || value === null || value === undefined) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      const normalizedKey = key.replace(/[-\s]/g, '_').toLowerCase();
+      if (structuredErrorKeys.has(normalizedKey) && (typeof item === 'string' || typeof item === 'number')) {
+        values.push(String(item));
+      }
+      if (normalizedKey === 'error' || normalizedKey === 'errors' || typeof item === 'object') {
+        visit(item, depth + 1);
+      }
+    }
+  };
+  visit(payload);
+  return values.join(' ').toLowerCase();
 }
 
 function resetAt(window) {
@@ -88,12 +128,23 @@ function remainingFraction(value) {
 
 function classifyFailure(provider, statusCode, body) {
   const text = String(body || '').toLowerCase();
-  if (/usage_limit_reached|quota.*exhaust|free-usage-exhausted|spending-limit/.test(text)) {
+  const structured = structuredErrorText(body);
+  const combined = `${structured} ${text}`;
+  if (/account[_ -]?deactivated|token[_ -]?(invalid|expired|revoked)|invalid[_ -]?grant|unauthorized|authentication[_ -]?failed/.test(structured)) {
+    return 'auth_invalid';
+  }
+  if (/(?:this\s+service\s+has\s+been\s+disabled\s+in\s+this\s+account|(?:account|team|organization)\s+(?:is|was|has\s+been)\s+(?:disabled|deactivated|blocked|suspended|terminated)|(?:disabled|deactivated|blocked|suspended|terminated)\s+(?:account|team|organization)|team[_ -]?blocked|(?:account|team|organization).{0,80}violation\s+of\s+terms(?:\s+of\s+service)?)/.test(text)) {
+    return 'disabled';
+  }
+  if (/usage_limit_reached|quota(?:[_ -]?exhausted|.*exhaust)|free-usage-exhausted|spending-limit/.test(combined)) {
     return 'quota_exhausted';
   }
   if (statusCode === 401) return 'auth_invalid';
   if (statusCode === 429) return 'rate_limited';
-  if (statusCode === 403 && provider !== 'xai') return 'auth_invalid';
+  if ([408, 499, 500, 502, 503, 504].includes(statusCode)) return 'transient';
+  if (/context\s+(?:canceled|cancelled)|deadline exceeded|timed? ?out|connection reset|broken pipe|upstream .*error/.test(text)) {
+    return 'transient';
+  }
   return 'unknown';
 }
 
@@ -421,7 +472,7 @@ async function probeXai(account, client) {
       throw new ProbeError('xAI official API team is blocked', {
         provider: 'xai',
         statusCode: 403,
-        classification: 'quota_exhausted',
+        classification: 'disabled',
       });
     }
     return {

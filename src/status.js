@@ -10,16 +10,28 @@ const severity = {
   auth_invalid: 5,
 };
 
-export function evaluateBaseState(account) {
-  if (account.disabled) return 'disabled';
-  if (account.unavailable) return 'unavailable';
+const transientStatusPattern = /context\s+(?:canceled|cancelled)|deadline exceeded|timed? ?out|connection reset|broken pipe|transient upstream error|bad gateway|service unavailable|request failed|upstream .*error/;
+const authInvalidStatusPattern = /(?:^|\s)(?:auth[_ -]?invalid|unauthorized)(?:$|\s)|account[_ -]?deactivated|invalid[_ -]?grant|token(?:[_ -]?(?:invalid|expired|revoked)| has been invalidated)|authentication failed|refresh token rejected/;
+
+export function isTransientStatus(account) {
+  const status = String(account?.cpaStatus || '').toLowerCase();
+  const message = String(account?.statusMessage || '').toLowerCase();
+  return transientStatusPattern.test(`${status} ${message}`);
+}
+
+export function evaluateBaseState(account, previousState = null) {
   const status = String(account.cpaStatus || '').toLowerCase();
   const message = String(account.statusMessage || '').toLowerCase();
   const combined = `${status} ${message}`;
-  if (/invalid|expired|revoked|unauthor|authentication failed|token.*fail/.test(combined)) {
+  if (account.disabled) return 'disabled';
+  if (authInvalidStatusPattern.test(combined)) {
     return 'auth_invalid';
   }
   if (/disabled/.test(status)) return 'disabled';
+  if (previousState && previousState !== 'missing' && isTransientStatus(account)) {
+    return previousState;
+  }
+  if (account.unavailable) return 'unavailable';
   if (/unavailable|error|failed/.test(status)) return 'unavailable';
   if (/ready|active|ok|available/.test(status)) return evaluateRequestHealth(account);
   return evaluateRequestHealth(account, 'unknown');
@@ -42,6 +54,7 @@ function evaluateRequestHealth(account, fallback = 'healthy') {
 export function evaluateQuotaState(result, warningPercent = 80) {
   if (!result?.supported) return 'unknown';
   if (result.classification === 'auth_invalid') return 'auth_invalid';
+  if (result.classification === 'disabled') return 'disabled';
   if (result.classification === 'quota_exhausted') return 'quota_exhausted';
   if (result.classification === 'rate_limited') return 'rate_limited';
   const percentages = (result.windows || [])
@@ -54,6 +67,8 @@ export function evaluateQuotaState(result, warningPercent = 80) {
 
 export function combineStates(baseState, quotaState) {
   if (baseState === 'missing') return 'missing';
+  if (quotaState === 'unknown') return baseState;
+  if (baseState === 'unknown') return quotaState;
   if ((severity[baseState] ?? 1) >= (severity[quotaState] ?? 1)) return baseState;
   return quotaState;
 }
@@ -65,4 +80,3 @@ export function stateSeverity(state) {
   }
   return 'info';
 }
-

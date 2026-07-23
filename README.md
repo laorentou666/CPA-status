@@ -101,9 +101,9 @@ NOTIFY_CHANNELS=telegram,pushplus,serverchan
 
 | 事件级别 | 当前对应情况 |
 | --- | --- |
-| `info` | 账号数量增加；账号从异常状态恢复为正常；CPA 连接恢复；其他不代表明确故障的状态信息 |
-| `warning` | 额度使用达到 `QUOTA_WARNING_PERCENT` 但尚未耗尽；最近至少 3 次请求且失败率达到 50%；账号被限流、禁用、不可用或从列表移除；账号数量减少 |
-| `critical` | 认证失效、Token 过期或被撤销；额度达到 100% 或 Provider 明确报告额度耗尽；CPA 管理接口无法连接 |
+| `info` | 明确异常账号恢复为正常；CPA 连接恢复；其他不代表明确故障的系统信息 |
+| `warning` | 账号被限流（HTTP 429）；明确禁用；账号从列表移除；账号数量减少 |
+| `critical` | HTTP 401 或结构化错误明确表示认证失效/账号停用；额度达到 100% 或 Provider 明确报告额度耗尽；CPA 管理接口无法连接 |
 
 启动后的首次检查如果发现多个异常账号：只包含警告类状态时记为 `warning`；其中包含认证失效或额度耗尽时记为 `critical`。
 
@@ -116,6 +116,10 @@ NOTIFY_CHANNELS=telegram,pushplus,serverchan
 | `critical` | 只发送 `critical` |
 
 `account_recovered` 和 `cpa_recovered` 两类恢复事件始终发送，即使门槛设置为 `warning` 或 `critical`，也不会错过恢复通知。
+
+额度检查只会把明确的认证、停用和额度错误升级为账号告警。`context canceled`、超时、连接重置、CPA HTTP 502、上游 408/500/502/503/504、普通 403、空响应和非法 JSON 都按临时探测失败处理：保留上一次账号状态，仅记录检查错误，不发送微信通知。新账号加入导致的数量增加也不发送通知；账号移除和数量减少仍会告警。
+
+CLIProxyAPI v7.2.29 的 `/api-call` 使用 HTTP 200 包装真实上游状态，实际状态位于响应的 `status_code` 字段。项目不会把所有 403 视为认证失效；只有 401、结构化 `account_deactivated`/`unauthorized`/`invalid_grant` 等错误，或响应明确包含账号停用/服务禁用信息时，才会判定账号异常。429 按 CLIProxyAPI 语义记录为额度耗尽/限流。
 
 ### 多接收人和多凭证
 

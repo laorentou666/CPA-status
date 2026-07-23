@@ -13,6 +13,8 @@ const stateLabels = {
   unknown: '未知',
 };
 
+const notifyStates = new Set(['auth_invalid', 'disabled', 'quota_exhausted', 'rate_limited']);
+
 export class AlertEngine {
   constructor(store, notifications) {
     this.store = store;
@@ -48,7 +50,8 @@ export class AlertEngine {
       reason
     );
     if (!this.initialized()) return null;
-    const recovered = currentState === 'healthy';
+    const recovered = currentState === 'healthy' && notifyStates.has(previousState);
+    if (!recovered && !notifyStates.has(currentState)) return null;
     return this.emit({
       type: recovered ? 'account_recovered' : 'account_state_changed',
       severity: recovered ? 'info' : stateSeverity(currentState),
@@ -72,7 +75,7 @@ export class AlertEngine {
   }
 
   async accountCountChanged(previousCount, currentCount) {
-    if (!this.initialized() || previousCount === null || previousCount === currentCount) return null;
+    if (!this.initialized() || previousCount === null || previousCount === currentCount || currentCount > previousCount) return null;
     return this.emit({
       type: 'account_count_changed',
       severity: currentCount < previousCount ? 'warning' : 'info',
@@ -83,9 +86,7 @@ export class AlertEngine {
   }
 
   async initialSnapshot(accounts) {
-    const unhealthy = accounts.filter((account) =>
-      ['warning', 'auth_invalid', 'unavailable', 'quota_exhausted'].includes(account.effective_state)
-    );
+    const unhealthy = accounts.filter((account) => notifyStates.has(account.effective_state));
     if (!unhealthy.length) return null;
     const critical = unhealthy.some((account) =>
       ['auth_invalid', 'quota_exhausted'].includes(account.effective_state)
