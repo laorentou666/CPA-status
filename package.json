@@ -11,6 +11,6 @@
     "start": "node --disable-warning=ExperimentalWarning src/main.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/main.js",
     "test": "node --disable-warning=ExperimentalWarning --test --experimental-test-isolation=none --test-concurrency=1 tests/*.test.js",
-    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke-test.js"
+    "smoke": "node --disable-warning=ExperimentalWarning tests/smoke-test.js"
   }
 }

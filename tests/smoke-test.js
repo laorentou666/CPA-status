@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { loadConfig } from '../src/config.js';
 import { createApplication } from '../src/application.js';
-import { fixtureFiles, mockApiCall, startMockCPA, waitFor } from '../tests/helpers.js';
+import { fixtureFiles, mockApiCall, startMockCPA, waitFor } from './helpers.js';
 
 async function request(url, options = {}) {
   return new Promise((resolve, reject) => {
