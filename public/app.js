@@ -10,7 +10,7 @@ const elements = Object.fromEntries(
     'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider', 'drawerTitle',
     'drawerContent', 'credentialDrawer', 'credentialBackdrop', 'credentialClose',
     'oauthTabButton', 'uploadTabButton', 'oauthPanel', 'uploadPanel', 'startOAuthButton',
-    'codexOAuthProviderButton', 'antigravityOAuthProviderButton',
+    'oauthProviderSelect',
     'oauthLinkRow', 'oauthLink', 'copyOAuthLinkButton', 'oauthCallbackForm',
     'oauthCallbackUrl', 'submitOAuthCallbackButton', 'oauthStatus', 'uploadForm',
     'authFileInput', 'chooseAuthFilesButton', 'uploadSelectionText', 'uploadFileList',
@@ -494,11 +494,7 @@ async function pollOAuthStatus() {
 function setOAuthProvider(provider) {
   if (!['codex', 'antigravity'].includes(provider) || oauthFlowId) return;
   oauthProvider = provider;
-  const antigravity = provider === 'antigravity';
-  elements.codexOAuthProviderButton.classList.toggle('active', !antigravity);
-  elements.antigravityOAuthProviderButton.classList.toggle('active', antigravity);
-  elements.codexOAuthProviderButton.setAttribute('aria-selected', String(!antigravity));
-  elements.antigravityOAuthProviderButton.setAttribute('aria-selected', String(antigravity));
+  elements.oauthProviderSelect.value = provider;
   elements.startOAuthButton.textContent = '生成链接';
   setImportStatus(elements.oauthStatus, '尚未开始');
 }
@@ -652,8 +648,7 @@ elements.credentialBackdrop.addEventListener('click', closeCredentialDrawer);
 elements.credentialClose.addEventListener('click', closeCredentialDrawer);
 elements.oauthTabButton.addEventListener('click', () => setImportTab('oauth'));
 elements.uploadTabButton.addEventListener('click', () => setImportTab('upload'));
-elements.codexOAuthProviderButton.addEventListener('click', () => setOAuthProvider('codex'));
-elements.antigravityOAuthProviderButton.addEventListener('click', () => setOAuthProvider('antigravity'));
+elements.oauthProviderSelect.addEventListener('change', (event) => setOAuthProvider(event.target.value));
 elements.startOAuthButton.addEventListener('click', startOAuth);
 elements.copyOAuthLinkButton.addEventListener('click', async () => {
   try {

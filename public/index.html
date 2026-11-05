@@ -143,9 +143,12 @@
             </div>
 
             <section id="oauthPanel" class="import-panel">
-              <div class="segmented oauth-provider-switch" role="tablist" aria-label="OAuth Provider">
-                <button id="codexOAuthProviderButton" class="segmented-button active" type="button" role="tab" aria-selected="true">Codex OAuth</button>
-                <button id="antigravityOAuthProviderButton" class="segmented-button" type="button" role="tab" aria-selected="false">Antigravity OAuth</button>
+              <div class="import-step">
+                <label for="oauthProviderSelect">选择 OAuth Provider</label>
+                <select id="oauthProviderSelect" class="input">
+                  <option value="codex">Codex OAuth</option>
+                  <option value="antigravity">Antigravity OAuth</option>
+                </select>
               </div>
               <div class="import-step">
                 <div class="import-step-head"><span>授权链接</span><button id="startOAuthButton" class="btn btn-primary" type="button">生成链接</button></div>
