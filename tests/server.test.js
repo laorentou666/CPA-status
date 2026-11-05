@@ -264,6 +264,30 @@ test('guest can add Codex OAuth and JSON credentials but cannot delete accounts'
   assert.equal(oauthStatus.status, 200);
   assert.equal((await oauthStatus.json()).status, 'ok');
 
+  const antigravityStart = await fetch(`${baseURL}/api/oauth/antigravity/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: '{}',
+  });
+  assert.equal(antigravityStart.status, 201);
+  const antigravityFlow = await antigravityStart.json();
+  const antigravityState = new URL(antigravityFlow.url).searchParams.get('state');
+  const antigravityCallback = await fetch(`${baseURL}/api/oauth/antigravity/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({
+      flowId: antigravityFlow.flowId,
+      redirectUrl: `http://localhost:51121/oauth-callback?code=test-code&state=${antigravityState}`,
+    }),
+  });
+  assert.equal(antigravityCallback.status, 202);
+  const antigravityStatus = await fetch(
+    `${baseURL}/api/oauth/antigravity/status?flowId=${encodeURIComponent(antigravityFlow.flowId)}`,
+    { headers: { Cookie: cookie } }
+  );
+  assert.equal(antigravityStatus.status, 200);
+  assert.equal((await antigravityStatus.json()).status, 'ok');
+
   const form = new FormData();
   form.append(
     'file',
@@ -280,7 +304,7 @@ test('guest can add Codex OAuth and JSON credentials but cannot delete accounts'
 
   await waitFor(async () => {
     const dashboard = await fetch(`${baseURL}/api/dashboard`).then((response) => response.json());
-    return dashboard.counts.total === 4;
+    return dashboard.counts.total === 5;
   });
 
   const replacement = new FormData();

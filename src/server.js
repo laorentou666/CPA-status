@@ -344,6 +344,44 @@ export function createHTTPServer({
         return json(response, 200, result);
       }
 
+      if (url.pathname === '/api/oauth/antigravity/start' && request.method === 'POST') {
+        const identity = requirePublicWriteClient(request, response);
+        enforceRateLimit('oauth-start', request, identity.clientId, {
+          limit: config.oauthStartRateLimit,
+          windowMs: config.oauthRateLimitWindowMs,
+        });
+        const result = await credentialImport.startAntigravityOAuth(identity.ownerKey);
+        return json(response, 201, result);
+      }
+
+      if (url.pathname === '/api/oauth/antigravity/callback' && request.method === 'POST') {
+        const identity = requirePublicWriteClient(request, response);
+        enforceRateLimit('oauth-callback', request, identity.clientId, {
+          limit: config.oauthCallbackRateLimit,
+          windowMs: config.oauthRateLimitWindowMs,
+        });
+        const body = await readJSON(request, 8 * 1024);
+        const result = await credentialImport.submitAntigravityCallback(
+          identity.ownerKey,
+          body.flowId,
+          body.redirectUrl
+        );
+        return json(response, 202, result);
+      }
+
+      if (url.pathname === '/api/oauth/antigravity/status' && request.method === 'GET') {
+        const identity = requirePublicWriteClient(request, response);
+        enforceRateLimit('oauth-status', request, identity.clientId, {
+          limit: config.oauthStatusRateLimit,
+          windowMs: config.oauthRateLimitWindowMs,
+        });
+        const result = await credentialImport.getAntigravityOAuthStatus(
+          identity.ownerKey,
+          url.searchParams.get('flowId')
+        );
+        return json(response, 200, result);
+      }
+
       if (url.pathname === '/api/auth-files/upload' && request.method === 'POST') {
         const identity = requirePublicWriteClient(request, response);
         enforceRateLimit('auth-upload', request, identity.clientId, {

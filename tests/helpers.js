@@ -81,14 +81,18 @@ export async function startMockCPA({ files = [], apiCall } = {}) {
       }));
       return;
     }
-    if (url.pathname === '/v0/management/codex-auth-url' && request.method === 'GET') {
-      const state = `codex-state-${++oauthStarts}`;
+    if (
+      (url.pathname === '/v0/management/codex-auth-url' || url.pathname === '/v0/management/antigravity-auth-url')
+      && request.method === 'GET'
+    ) {
+      const provider = url.pathname.includes('antigravity') ? 'antigravity' : 'codex';
+      const state = `${provider}-state-${++oauthStarts}`;
       oauthSessions.set(state, { status: 'wait' });
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({
         status: 'ok',
         state,
-        url: `https://auth.example.test/authorize?state=${encodeURIComponent(state)}`,
+        url: `https://auth.example.test/${provider}?state=${encodeURIComponent(state)}`,
       }));
       return;
     }
@@ -110,7 +114,7 @@ export async function startMockCPA({ files = [], apiCall } = {}) {
           id: `${state}.json`,
           auth_index: `oauth-${oauthStarts}`,
           name: `${state}.json`,
-          provider: 'codex',
+          provider: state.startsWith('antigravity-') ? 'antigravity' : 'codex',
           label: 'OAuth User',
           email: `oauth-${oauthStarts}@example.com`,
           status: 'ready',

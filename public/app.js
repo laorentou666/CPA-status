@@ -10,6 +10,7 @@ const elements = Object.fromEntries(
     'accountDrawer', 'drawerBackdrop', 'drawerClose', 'drawerProvider', 'drawerTitle',
     'drawerContent', 'credentialDrawer', 'credentialBackdrop', 'credentialClose',
     'oauthTabButton', 'uploadTabButton', 'oauthPanel', 'uploadPanel', 'startOAuthButton',
+    'codexOAuthProviderButton', 'antigravityOAuthProviderButton',
     'oauthLinkRow', 'oauthLink', 'copyOAuthLinkButton', 'oauthCallbackForm',
     'oauthCallbackUrl', 'submitOAuthCallbackButton', 'oauthStatus', 'uploadForm',
     'authFileInput', 'chooseAuthFilesButton', 'uploadSelectionText', 'uploadFileList',
@@ -36,6 +37,7 @@ let oauthPollTimer = null;
 let oauthPolling = false;
 let oauthPollErrors = 0;
 let selectedAuthFiles = [];
+let oauthProvider = 'codex';
 
 function escapeHTML(value) {
   return String(value ?? '')
@@ -443,7 +445,7 @@ async function pollOAuthStatus() {
   if (!oauthFlowId || oauthPolling) return;
   oauthPolling = true;
   try {
-    const result = await api(`/api/oauth/codex/status?flowId=${encodeURIComponent(oauthFlowId)}`);
+    const result = await api(`/api/oauth/${oauthProvider}/status?flowId=${encodeURIComponent(oauthFlowId)}`);
     oauthPollErrors = 0;
     if (result.status === 'ok') {
       stopOAuthPolling();
@@ -453,7 +455,7 @@ async function pollOAuthStatus() {
       elements.submitOAuthCallbackButton.disabled = true;
       setImportStatus(elements.oauthStatus, '认证成功，账号已同步', 'success');
       await loadDashboard();
-      showToast('Codex OAuth 认证成功');
+      showToast(`${oauthProvider === 'antigravity' ? 'Antigravity' : 'Codex'} OAuth 认证成功`);
       return;
     }
     if (result.status === 'error') {
@@ -489,7 +491,19 @@ async function pollOAuthStatus() {
   }
 }
 
-async function startCodexOAuth() {
+function setOAuthProvider(provider) {
+  if (!['codex', 'antigravity'].includes(provider) || oauthFlowId) return;
+  oauthProvider = provider;
+  const antigravity = provider === 'antigravity';
+  elements.codexOAuthProviderButton.classList.toggle('active', !antigravity);
+  elements.antigravityOAuthProviderButton.classList.toggle('active', antigravity);
+  elements.codexOAuthProviderButton.setAttribute('aria-selected', String(!antigravity));
+  elements.antigravityOAuthProviderButton.setAttribute('aria-selected', String(antigravity));
+  elements.startOAuthButton.textContent = '生成链接';
+  setImportStatus(elements.oauthStatus, '尚未开始');
+}
+
+async function startOAuth() {
   elements.startOAuthButton.disabled = true;
   elements.startOAuthButton.textContent = '生成中...';
   elements.submitOAuthCallbackButton.disabled = true;
@@ -498,7 +512,7 @@ async function startCodexOAuth() {
   setImportStatus(elements.oauthStatus, '正在连接 CPA', 'pending');
   oauthPollErrors = 0;
   try {
-    const result = await api('/api/oauth/codex/start', {
+    const result = await api(`/api/oauth/${oauthProvider}/start`, {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -638,7 +652,9 @@ elements.credentialBackdrop.addEventListener('click', closeCredentialDrawer);
 elements.credentialClose.addEventListener('click', closeCredentialDrawer);
 elements.oauthTabButton.addEventListener('click', () => setImportTab('oauth'));
 elements.uploadTabButton.addEventListener('click', () => setImportTab('upload'));
-elements.startOAuthButton.addEventListener('click', startCodexOAuth);
+elements.codexOAuthProviderButton.addEventListener('click', () => setOAuthProvider('codex'));
+elements.antigravityOAuthProviderButton.addEventListener('click', () => setOAuthProvider('antigravity'));
+elements.startOAuthButton.addEventListener('click', startOAuth);
 elements.copyOAuthLinkButton.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(elements.oauthLink.href);
@@ -653,7 +669,7 @@ elements.oauthCallbackForm.addEventListener('submit', async (event) => {
   elements.submitOAuthCallbackButton.disabled = true;
   setImportStatus(elements.oauthStatus, '正在提交回调 URL', 'pending');
   try {
-    await api('/api/oauth/codex/callback', {
+    await api(`/api/oauth/${oauthProvider}/callback`, {
       method: 'POST',
       body: JSON.stringify({
         flowId: oauthFlowId,

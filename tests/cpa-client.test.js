@@ -38,6 +38,15 @@ test('CPA client reads v7.2.29 auth file shape and proxies an allowlisted call',
     redirectURL: `http://localhost:1455/auth/callback?code=test-code&state=${oauth.state}`,
   });
   assert.equal((await client.getOAuthStatus(oauth.state)).status, 'ok');
+
+  const antigravity = await client.startAntigravityOAuth();
+  assert.match(antigravity.url, /^https:\/\/auth\.example\.test\/antigravity/);
+  await client.submitOAuthCallback({
+    provider: 'antigravity',
+    state: antigravity.state,
+    redirectURL: `http://localhost:51121/oauth-callback?code=test-code&state=${antigravity.state}`,
+  });
+  assert.equal((await client.getOAuthStatus(antigravity.state)).status, 'ok');
 });
 
 test('CPA client rejects arbitrary api-call targets', async () => {

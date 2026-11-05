@@ -109,7 +109,11 @@ export class CredentialImportService {
     return count;
   }
 
-  async startCodexOAuth(ownerKey) {
+  async startOAuth(provider, ownerKey) {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (!['codex', 'antigravity'].includes(normalizedProvider)) {
+      throw new CredentialImportError('不支持的 OAuth Provider', 400);
+    }
     if (!ownerKey) throw new CredentialImportError('客户端会话无效', 403);
     const ownerPending = this.pendingOAuthStartsByOwner.get(ownerKey) || 0;
     if (this.activeFlowCount() + this.pendingOAuthStarts >= this.config.oauthMaxActiveFlows) {
@@ -122,13 +126,19 @@ export class CredentialImportService {
     this.pendingOAuthStarts += 1;
     this.pendingOAuthStartsByOwner.set(ownerKey, ownerPending + 1);
     try {
-      const started = await this.cpaClient.startCodexOAuth();
+      const startMethod = this.cpaClient.startOAuth?.bind(this.cpaClient)
+        || (normalizedProvider === 'codex'
+          ? this.cpaClient.startCodexOAuth?.bind(this.cpaClient)
+          : this.cpaClient.startAntigravityOAuth?.bind(this.cpaClient));
+      if (!startMethod) throw new CredentialImportError('CPA OAuth 接口不可用', 502);
+      const started = await startMethod(normalizedProvider);
       const flowId = randomBytes(24).toString('base64url');
       const now = this.now();
       const expiresAt = now + 5 * 60 * 1000;
       this.flows.set(flowId, {
         flowId,
         ownerKey,
+        provider: normalizedProvider,
         cpaState: started.state,
         expiresAt,
         callbackSubmitted: false,
@@ -150,6 +160,14 @@ export class CredentialImportService {
     }
   }
 
+  async startCodexOAuth(ownerKey) {
+    return this.startOAuth('codex', ownerKey);
+  }
+
+  async startAntigravityOAuth(ownerKey) {
+    return this.startOAuth('antigravity', ownerKey);
+  }
+
   requireFlow(flowId, ownerKey) {
     this.cleanupFlows();
     const flow = this.flows.get(String(flowId || '').trim());
@@ -160,15 +178,19 @@ export class CredentialImportService {
     return flow;
   }
 
-  async submitCodexCallback(ownerKey, flowId, redirectURL) {
+  async submitOAuthCallback(provider, ownerKey, flowId, redirectURL) {
     const flow = this.requireFlow(flowId, ownerKey);
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (flow.provider !== normalizedProvider) {
+      throw new CredentialImportError('OAuth Provider 与当前流程不匹配', 400);
+    }
     if (flow.status === 'ok') return { status: 'ok' };
     if (flow.status === 'error') throw new CredentialImportError(flow.error || 'OAuth 已失败', 409);
     if (flow.callbackSubmitted) return { status: 'submitted' };
 
     const value = callbackDetails(redirectURL, flow.cpaState);
     await this.cpaClient.submitOAuthCallback({
-      provider: 'codex',
+      provider: normalizedProvider,
       redirectURL: value,
       state: flow.cpaState,
     });
@@ -177,8 +199,20 @@ export class CredentialImportService {
     return { status: 'submitted' };
   }
 
-  async getCodexOAuthStatus(ownerKey, flowId) {
+  async submitCodexCallback(ownerKey, flowId, redirectURL) {
+    return this.submitOAuthCallback('codex', ownerKey, flowId, redirectURL);
+  }
+
+  async submitAntigravityCallback(ownerKey, flowId, redirectURL) {
+    return this.submitOAuthCallback('antigravity', ownerKey, flowId, redirectURL);
+  }
+
+  async getOAuthStatus(provider, ownerKey, flowId) {
     const flow = this.requireFlow(flowId, ownerKey);
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (flow.provider !== normalizedProvider) {
+      throw new CredentialImportError('OAuth Provider 与当前流程不匹配', 400);
+    }
     if (flow.status !== 'wait') {
       return { status: flow.status, error: flow.error || undefined };
     }
@@ -211,6 +245,14 @@ export class CredentialImportService {
       }
     }
     return { status: 'ok' };
+  }
+
+  async getCodexOAuthStatus(ownerKey, flowId) {
+    return this.getOAuthStatus('codex', ownerKey, flowId);
+  }
+
+  async getAntigravityOAuthStatus(ownerKey, flowId) {
+    return this.getOAuthStatus('antigravity', ownerKey, flowId);
   }
 
   async uploadAuthFiles(files, { allowOverwrite = false } = {}) {

@@ -85,3 +85,28 @@ test('credential import reserves OAuth capacity while CPA start is pending', asy
   releaseStart();
   await first;
 });
+
+test('credential import supports Antigravity OAuth with the same protected flow lifecycle', async (t) => {
+  const mock = await startMockCPA({ files: fixtureFiles() });
+  t.after(mock.close);
+  const scheduler = { refreshes: 0, async refreshAfterMutation() { this.refreshes += 1; } };
+  const service = new CredentialImportService({
+    config: loadConfig({
+      cpaManagementURL: mock.managementURL,
+      oauthStatusMinIntervalMs: 0,
+    }),
+    cpaClient: new CPAClient({ managementURL: mock.managementURL }),
+    scheduler,
+    logger: { error() {} },
+  });
+
+  const started = await service.startAntigravityOAuth('guest:127.0.0.1');
+  const state = new URL(started.url).searchParams.get('state');
+  await service.submitAntigravityCallback(
+    'guest:127.0.0.1',
+    started.flowId,
+    `http://localhost:51121/oauth-callback?code=test&state=${state}`
+  );
+  assert.equal((await service.getAntigravityOAuthStatus('guest:127.0.0.1', started.flowId)).status, 'ok');
+  assert.equal(scheduler.refreshes, 1);
+});

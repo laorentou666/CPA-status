@@ -97,12 +97,27 @@ export class CPAClient {
     };
   }
 
-  async startCodexOAuth() {
-    const payload = await this.request('/codex-auth-url?is_webui=true');
+  async startOAuth(provider) {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    const endpoints = {
+      codex: '/codex-auth-url?is_webui=true',
+      antigravity: '/antigravity-auth-url?is_webui=true',
+    };
+    const endpoint = endpoints[normalizedProvider];
+    if (!endpoint) throw new CPAError(`Unsupported OAuth provider: ${normalizedProvider}`);
+    const payload = await this.request(endpoint);
     const url = String(payload?.url || '').trim();
     const state = String(payload?.state || '').trim();
-    if (!url || !state) throw new CPAError('CPA codex-auth-url returned an invalid payload');
+    if (!url || !state) throw new CPAError(`CPA ${normalizedProvider}-auth-url returned an invalid payload`);
     return { url, state };
+  }
+
+  async startCodexOAuth() {
+    return this.startOAuth('codex');
+  }
+
+  async startAntigravityOAuth() {
+    return this.startOAuth('antigravity');
   }
 
   async submitOAuthCallback({ provider, redirectURL, state }) {

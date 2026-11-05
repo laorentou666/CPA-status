@@ -219,11 +219,11 @@ SERVERCHAN_SENDKEY_2=sctp123tyyyyyyyy
 
 修改并保存 `.env` 后无需重启。进入 `/admin`，可在“通知渠道”区域分别发送测试消息。
 
-## Codex OAuth 与认证文件上传
+## Codex / Antigravity OAuth 与认证文件上传
 
 游客页和管理员页的“添加账号”入口支持两种方式：
 
-- Codex OAuth：由 CPA 生成授权链接。远程浏览器授权完成后，把浏览器地址栏中的完整回调 URL 粘贴回来；CPA 负责校验 state、交换 Token 并保存认证文件。
+- Codex OAuth 与 Antigravity OAuth：由 CPA 生成对应 Provider 的授权链接。远程浏览器授权完成后，把浏览器地址栏中的完整回调 URL 粘贴回来；CPA 负责校验 state、交换 Token 并保存认证文件。
 - JSON 上传：只接受扩展名为 `.json`、顶层为 JSON 对象的认证文件。文件内容只在内存中校验并转发给 CPA，不写入本项目的 SQLite，也不会返回到前端。
 
 游客上传前会重新读取 CPA 认证文件列表并阻止同名覆盖。管理员会话允许上传替换已有文件。OAuth 完成或文件上传成功后，监控服务会立即重新同步账号列表。
